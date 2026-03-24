@@ -839,6 +839,11 @@ function App() {
                 onPause={() => setPlaying(false)}
                 disabled={processing || isProcessingYouTube}
                 seekTo={seekTo}
+                label={
+                  semitones !== 0
+                    ? `Transposed: ${semitones > 0 ? "+" : ""}${semitones} semitone${Math.abs(semitones) === 1 ? "" : "s"}`
+                    : "Original playback"
+                }
               />
             )}
             {file && isVideo(file) && (
@@ -849,32 +854,24 @@ function App() {
                 onPause={() => setPlaying(false)}
                 disabled={processing || isProcessingYouTube}
                 seekTo={seekTo}
+                label={
+                  semitones !== 0
+                    ? `Transposed: ${semitones > 0 ? "+" : ""}${semitones} semitone${Math.abs(semitones) === 1 ? "" : "s"}`
+                    : "Original playback"
+                }
               />
             )}
             {/* Show transposed audio player for YouTube audio result */}
             {youtubeUrl && transposedSrc && (
-              <>
-                <div
-                  style={{
-                    textAlign: "center",
-                    color: "#9ae6b4",
-                    fontSize: 13,
-                    marginTop: 8,
-                    marginBottom: 4,
-                  }}
-                >
-                  Transposed playback: {semitones > 0 ? `+${semitones}` : semitones} semitone
-                  {Math.abs(semitones) === 1 ? "" : "s"}
-                </div>
-                <AudioPlayer
-                  src={transposedSrc}
-                  playing={playing}
-                  onPlay={() => setPlaying(true)}
-                  onPause={() => setPlaying(false)}
-                  disabled={processing || isProcessingYouTube}
-                  seekTo={seekTo}
-                />
-              </>
+              <AudioPlayer
+                src={transposedSrc}
+                playing={playing}
+                onPlay={() => setPlaying(true)}
+                onPause={() => setPlaying(false)}
+                disabled={processing || isProcessingYouTube}
+                seekTo={seekTo}
+                label={`Transposed playback: ${semitones > 0 ? "+" : ""}${semitones} semitone${Math.abs(semitones) === 1 ? "" : "s"}`}
+              />
             )}
             <DownloadShare
               onDownload={handleDownload}

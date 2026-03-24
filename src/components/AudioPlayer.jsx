@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from "react";
+import styles from "./AudioPlayer.module.css";
 
-const AudioPlayer = ({ src, playing, onPlay, onPause, disabled, seekTo }) => {
+const AudioPlayer = ({ src, playing, onPlay, onPause, disabled, seekTo, label }) => {
   const audioRef = useRef();
 
   useEffect(() => {
@@ -10,16 +11,19 @@ const AudioPlayer = ({ src, playing, onPlay, onPause, disabled, seekTo }) => {
   }, [src, seekTo]);
 
   return (
-    <audio
-      ref={audioRef}
-      src={src}
-      controls
-      autoPlay={playing}
-      onPlay={onPlay}
-      onPause={onPause}
-      disabled={disabled}
-      style={{ width: "100%", margin: "12px 0" }}
-    />
+    <div className={styles.audioPlayerContainer}>
+      {label && <div className={styles.audioPlayerLabel}>{label}</div>}
+      <audio
+        ref={audioRef}
+        src={src}
+        controls
+        autoPlay={playing}
+        onPlay={onPlay}
+        onPause={onPause}
+        disabled={disabled}
+        className={styles.audioPlayer}
+      />
+    </div>
   );
 };
 

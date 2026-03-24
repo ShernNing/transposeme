@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from "react";
+import styles from "./VideoPlayer.module.css";
 
-const VideoPlayer = ({ src, playing, onPlay, onPause, disabled, seekTo }) => {
+const VideoPlayer = ({ src, playing, onPlay, onPause, disabled, seekTo, label }) => {
   const videoRef = useRef();
 
   useEffect(() => {
@@ -10,16 +11,19 @@ const VideoPlayer = ({ src, playing, onPlay, onPause, disabled, seekTo }) => {
   }, [src, seekTo]);
 
   return (
-    <video
-      ref={videoRef}
-      src={src}
-      controls
-      autoPlay={playing}
-      onPlay={onPlay}
-      onPause={onPause}
-      disabled={disabled}
-      style={{ width: "100%", margin: "12px 0", background: "#000" }}
-    />
+    <div className={styles.videoPlayerContainer}>
+      {label && <div className={styles.videoPlayerLabel}>{label}</div>}
+      <video
+        ref={videoRef}
+        src={src}
+        controls
+        autoPlay={playing}
+        onPlay={onPlay}
+        onPause={onPause}
+        disabled={disabled}
+        className={styles.videoPlayer}
+      />
+    </div>
   );
 };
 
