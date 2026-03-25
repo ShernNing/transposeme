@@ -157,7 +157,10 @@ input[type="range"] {
 .progress-label {
   color: #d8def0;
   margin-bottom: 6px;
-  min-height: 1.2em;
+  min-height: 1.6em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .progress-track {
@@ -176,10 +179,10 @@ input[type="range"] {
 }
 
 .spinner {
-  display: inline-block;
-  vertical-align: middle;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   margin-left: 8px;
-  margin-bottom: 2px;
   height: 1.2em;
   width: 1.2em;
 }

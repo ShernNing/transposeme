@@ -700,6 +700,19 @@ function App() {
     setProgress(10);
     if (youtubeUrl) {
       setIsProcessingYouTube(true);
+      // Helper: retry async function up to n times
+      async function retry(fn, attempts = 3, delay = 500) {
+        let lastErr;
+        for (let i = 0; i < attempts; ++i) {
+          try {
+            return await fn();
+          } catch (err) {
+            lastErr = err;
+            if (i < attempts - 1) await new Promise(res => setTimeout(res, delay));
+          }
+        }
+        throw lastErr;
+      }
       try {
         const blob = await fetchYouTubeTransposed(youtubeUrl, newSemitones);
         setTransposedFromBlob(blob);
@@ -709,14 +722,24 @@ function App() {
         setShowOriginalYouTube(false);
         setSeekTo(currentTime);
         setPlaying(true);
-        // Save processed YouTube transposition to DB/history
-        let title = await fetchYouTubeTitle(youtubeUrl);
-        const meta = await extractMetadata(blob, 'audio');
+        // Retry fetching metadata and title up to 3 times
+        let title = youtubeUrl;
+        let meta = null;
+        try {
+          title = (await retry(() => fetchYouTubeTitle(youtubeUrl), 3, 500)) || youtubeUrl;
+        } catch {
+          // Ignore error, fallback to youtubeUrl as title
+        }
+        try {
+          meta = await retry(() => extractMetadata(blob, 'audio'), 3, 500);
+        } catch {
+          // Ignore error, fallback to null metadata
+        }
         addProcessedItem({
           id: `${youtubeUrl}::${newSemitones}`,
           type: 'youtube',
-          label: title || youtubeUrl,
-          title: title || youtubeUrl,
+          label: title,
+          title: title,
           src: URL.createObjectURL(blob),
           blob: blob,
           semitones: newSemitones,
@@ -728,6 +751,19 @@ function App() {
         if (e.name === "AbortError") return;
         setTransposedSrc(null);
         setAppError("YouTube processing failed: " + (e?.message || "Unknown error"));
+        // Still add a minimal processed item for history/selector
+        addProcessedItem({
+          id: `${youtubeUrl}::${newSemitones}`,
+          type: 'youtube',
+          label: youtubeUrl,
+          title: youtubeUrl,
+          src: null,
+          blob: null,
+          semitones: newSemitones,
+          isYouTube: true,
+          youtubeUrl: youtubeUrl,
+          metadata: null,
+        });
       } finally {
         setIsProcessingYouTube(false);
       }
@@ -951,7 +987,7 @@ function App() {
             setProcessedItems(dbItems);
           }} />
 
-          {(processing || isProcessingYouTube || ((file || youtubeUrl) && progress < 100)) && (
+          {/* {(processing || isProcessingYouTube || ((file || youtubeUrl) && progress < 100)) && (
             <ProgressBar
               progress={progress}
               label={
@@ -960,7 +996,7 @@ function App() {
                   : ""
               }
             />
-          )}
+          )} */}
 
           <YouTubeInput onSubmit={handleYouTube} disabled={processing || isProcessingYouTube} />
           <PlayerSection
@@ -980,6 +1016,8 @@ function App() {
             VideoPlayer={VideoPlayer}
             processedItems={processedItems}
             controlsDisabled={processing || isProcessingYouTube}
+            youtubeKey={youtubeKey}
+            transposeDetectedKey={transposeDetectedKey}
           />
 
 {youtubeUrl && (
@@ -1005,6 +1043,58 @@ function App() {
                 isAnalyzingKey={isAnalyzingKey}
                 isProcessingYouTube={isProcessingYouTube}
                 handleAnalyzeKey={handleAnalyzeKey}
+                handleReanalyzeKey={async () => {
+                  // Force reanalyze key
+                  await handleAnalyzeKey(undefined, true);
+                  // After reanalyze, try to refetch metadata and title, then update DB/history
+                  if (!youtubeUrl) return;
+                  // Helper: retry async function up to n times
+                  async function retry(fn, attempts = 3, delay = 500) {
+                    let lastErr;
+                    for (let i = 0; i < attempts; ++i) {
+                      try {
+                        return await fn();
+                      } catch (err) {
+                        lastErr = err;
+                        if (i < attempts - 1) await new Promise(res => setTimeout(res, delay));
+                      }
+                    }
+                    throw lastErr;
+                  }
+                  let title = youtubeUrl;
+                  let meta = null;
+                  try {
+                    title = (await retry(() => fetchYouTubeTitle(youtubeUrl), 3, 500)) || youtubeUrl;
+                  } catch {
+                    // Ignore error, fallback to youtubeUrl as title
+                  }
+                  try {
+                    // Try to get the latest blob from processedItems if available
+                    let blob = null;
+                    const latest = processedItems.find(
+                      (item) => item.isYouTube && item.youtubeUrl === youtubeUrl && Number(item.semitones) === appliedSemitones
+                    );
+                    if (latest && latest.blob) blob = latest.blob;
+                    if (blob) meta = await retry(() => extractMetadata(blob, 'audio'), 3, 500);
+                  } catch {
+                    // Ignore error, fallback to null metadata
+                  }
+                  // Update processed item in DB/history with new key and metadata
+                  const updatedItem = {
+                    id: `${youtubeUrl}::${appliedSemitones}`,
+                    type: 'youtube',
+                    label: title,
+                    title: title,
+                    src: null, // let addProcessedItem handle src/blob
+                    blob: null,
+                    semitones: appliedSemitones,
+                    isYouTube: true,
+                    youtubeUrl: youtubeUrl,
+                    metadata: meta,
+                    key: youtubeKey,
+                  };
+                  addProcessedItem(updatedItem);
+                }}
                 keyFeedback={keyFeedback}
                 keyAnalyzeDots={keyAnalyzeDots}
                 youtubeKey={youtubeKey}

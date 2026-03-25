@@ -13,6 +13,8 @@ export default function PlayerSection({
   appliedSemitones,
   processedItems = [],
   controlsDisabled = false,
+  youtubeKey, // pass from App if available
+  transposeDetectedKey, // pass from App
   ...audioVideoProps
 }) {
   const { isAudio, isVideo } = audioVideoProps;
@@ -30,6 +32,12 @@ export default function PlayerSection({
   }
   const title = processedItem?.title || processedItem?.fileName || processedItem?.label || '';
   const meta = processedItem?.metadata;
+  // Determine the original key (from metadata or youtubeKey)
+  const originalKey = meta?.key || youtubeKey || "";
+  // Compute the current key after transposition
+  const currentKey = originalKey && typeof transposeDetectedKey === 'function'
+    ? transposeDetectedKey(originalKey, semitones)
+    : "";
 
   function formatDuration(seconds) {
     if (!isFinite(seconds)) return '';
@@ -51,28 +59,37 @@ export default function PlayerSection({
         .join(' • ')
     : '';
 
+  function labelWithKey(base, key) {
+    return key ? `${base}  |  Key: ${key}` : base;
+  }
   let audioLabel = '';
   if (file && isAudio(file)) {
-    audioLabel =
+    audioLabel = labelWithKey(
       (title ? `${title}  |  ` : '') +
       (semitones !== 0
         ? `Transposed: ${semitones > 0 ? "+" : ""}${semitones} semitone${Math.abs(semitones) === 1 ? "" : "s"}`
-        : "Original playback") + (metaString ? `  |  ${metaString}` : "");
+        : "Original playback") + (metaString ? `  |  ${metaString}` : ""),
+      currentKey
+    );
   }
   let videoLabel = '';
   if (file && isVideo(file)) {
-    videoLabel =
+    videoLabel = labelWithKey(
       (title ? `${title}  |  ` : '') +
       (semitones !== 0
         ? `Transposed: ${semitones > 0 ? "+" : ""}${semitones} semitone${Math.abs(semitones) === 1 ? "" : "s"}`
-        : "Original playback") + (metaString ? `  |  ${metaString}` : "");
+        : "Original playback") + (metaString ? `  |  ${metaString}` : ""),
+      currentKey
+    );
   }
   let ytLabel = '';
   if (youtubeUrl && transposedSrc) {
-    ytLabel =
+    ytLabel = labelWithKey(
       (title ? `${title}  |  ` : '') +
       `Transposed playback: ${semitones > 0 ? "+" : ""}${semitones} semitone${Math.abs(semitones) === 1 ? "" : "s"}` +
-      (metaString ? `  |  ${metaString}` : "");
+      (metaString ? `  |  ${metaString}` : ""),
+      currentKey
+    );
   }
 
   return (

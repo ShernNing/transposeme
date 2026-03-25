@@ -11,11 +11,13 @@ const Spinner = () => (
   </span>
 );
 
+
 const ProgressBar = ({ progress, label }) => (
   <div className="progress-wrap">
-    <div className="progress-label">
-      {label}
+    <div className="progress-label" style={{ display: 'flex', alignItems: 'center', gap: 10, minHeight: '1.6em' }}>
+      <span>{label}</span>
       {progress < 100 && <Spinner />}
+      <span style={{ marginLeft: 'auto', fontSize: 13, color: '#90cdf4', minWidth: 48, textAlign: 'right' }}>{progress}%</span>
     </div>
     <div className="progress-track">
       <div className="progress-bar" style={{ width: `${progress}%` }} />
