@@ -12,6 +12,7 @@ export default function PlayerSection({
   semitones,
   appliedSemitones,
   processedItems = [],
+  controlsDisabled = false,
   ...audioVideoProps
 }) {
   const { isAudio, isVideo } = audioVideoProps;
@@ -82,7 +83,7 @@ export default function PlayerSection({
           playing={playing}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
-          disabled={processing || isProcessingYouTube}
+          disabled={controlsDisabled}
           seekTo={seekTo}
           label={audioLabel}
         />
@@ -93,7 +94,7 @@ export default function PlayerSection({
           playing={playing}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
-          disabled={processing || isProcessingYouTube}
+          disabled={controlsDisabled}
           seekTo={seekTo}
           label={videoLabel}
         />
@@ -105,7 +106,7 @@ export default function PlayerSection({
           playing={playing}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
-          disabled={processing || isProcessingYouTube}
+          disabled={controlsDisabled}
           seekTo={seekTo}
           label={ytLabel}
         />

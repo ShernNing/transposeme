@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { clearAllProcessedItems } from "../utils/db";
 
+
 // Format duration as h:mm:ss or m:ss
 function formatDuration(seconds) {
   if (!isFinite(seconds)) return '';
@@ -14,15 +15,57 @@ function formatDuration(seconds) {
 }
 
 export default function ProcessedHistory({ processedItems, onLoad, onDelete, onClear, onRefresh }) {
+    // Search/filter state
+    const [search, setSearch] = useState("");
+    const [typeFilter, setTypeFilter] = useState("all");
   // Track which item is hovered for styling and delete button
   const [hoveredId, setHoveredId] = useState(null);
+  // Track last deleted item for undo
+  const [lastDeleted, setLastDeleted] = useState(null);
+
+  // Handler: Delete a single item (with undo)
+  const handleDelete = (item) => {
+    setLastDeleted(item);
+    if (onDelete) onDelete(item.id);
+  };
+
+  // Handler: Undo last delete
+  const handleUndo = () => {
+    if (lastDeleted && window.confirm("Restore deleted item?")) {
+      // Re-add to DB and refresh
+      import("../utils/db").then(({ saveProcessedItem }) => {
+        saveProcessedItem(lastDeleted).then(() => {
+          if (onRefresh) onRefresh();
+          setLastDeleted(null);
+        });
+      });
+    }
+  };
 
   // Only show items with semitones === 0 (original key)
-  const originalItems = processedItems.filter(item => item.semitones === 0);
+  let originalItems = processedItems.filter(item => item.semitones === 0);
+  // Filter by type
+  if (typeFilter !== "all") {
+    originalItems = originalItems.filter(item =>
+      (typeFilter === "youtube" && item.isYouTube) ||
+      (typeFilter === "file" && !item.isYouTube)
+    );
+  }
+  // Filter by search
+  if (search.trim()) {
+    const q = search.trim().toLowerCase();
+    originalItems = originalItems.filter(item =>
+      (item.fileName && item.fileName.toLowerCase().includes(q)) ||
+      (item.title && item.title.toLowerCase().includes(q)) ||
+      (item.label && item.label.toLowerCase().includes(q)) ||
+      (item.youtubeUrl && item.youtubeUrl.toLowerCase().includes(q))
+    );
+  }
 
 
-  // Handler: Clear all processed items
+  // Handler: Clear all processed items with confirmation
   const handleClear = async () => {
+    if (!window.confirm("Are you sure you want to clear all processed history? This cannot be undone.")) return;
     await clearAllProcessedItems();
     if (onClear) onClear();
   };
@@ -62,6 +105,25 @@ export default function ProcessedHistory({ processedItems, onLoad, onDelete, onC
             Refresh
           </button>
         </div>
+      </div>
+      {/* Filter/search controls */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '0 20px 8px 20px', marginBottom: 2 }}>
+        <input
+          type="text"
+          placeholder="Search by title or URL..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ flex: 1, padding: '6px 10px', borderRadius: 6, border: '1px solid #38405a', background: '#23272f', color: '#e2e8f0', fontSize: 14 }}
+        />
+        <select
+          value={typeFilter}
+          onChange={e => setTypeFilter(e.target.value)}
+          style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #38405a', background: '#23272f', color: '#e2e8f0', fontSize: 14 }}
+        >
+          <option value="all">All</option>
+          <option value="file">Files</option>
+          <option value="youtube">YouTube</option>
+        </select>
       </div>
       {/* List of processed items (only originals) */}
       <div style={{ display: "flex", flexDirection: 'column', gap: 0 }}>

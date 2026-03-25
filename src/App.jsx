@@ -351,13 +351,22 @@ function App() {
   const prettyApiError = (fallbackMessage, payloadText = "") => {
     const text = (payloadText || "").toLowerCase();
     if (text.includes("proxy") || text.includes("403")) {
-      return "Network/proxy blocked YouTube download. Disable proxy/VPN and try again.";
+      return "Network/proxy blocked YouTube download. Please disable any proxy/VPN and try again. If the problem persists, check your firewall or browser extensions.";
     }
     if (text.includes("private video") || text.includes("video unavailable")) {
-      return "This YouTube video is unavailable for download.";
+      return "This YouTube video is unavailable for download. It may be private, region-locked, or removed.";
     }
     if (text.includes("rate limit") || text.includes("too many requests")) {
-      return "Rate limited by YouTube. Wait a minute and try again.";
+      return "YouTube has temporarily rate-limited your requests. Please wait a minute and try again. If this happens repeatedly, try a different network or browser.";
+    }
+    if (text.includes("networkerror") || text.includes("failed to fetch")) {
+      return "Network error: Unable to reach the server. Please check your internet connection and try again.";
+    }
+    if (text.includes("timeout")) {
+      return "The request timed out. The server may be busy or your connection is slow. Please try again in a moment.";
+    }
+    if (text.includes("unsupported format") || text.includes("not supported")) {
+      return "The selected file or video format is not supported. Please use a standard audio or video file, or a valid YouTube link.";
     }
     return fallbackMessage;
   };
@@ -400,91 +409,97 @@ function App() {
     setTransposedSrc(null);
     if (f) {
       setProgress(10);
-      if (useWasm && isAudio(f)) {
-        const arrayBuffer = await f.arrayBuffer();
-        const audioCtx = new (
-          window.AudioContext || window.webkitAudioContext
-        )();
-        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-        const transposedBuffer = await transposeAudioBuffer(audioBuffer, 0);
-        const wavBlob = await audioBufferToWavBlob(transposedBuffer);
-        setTransposedFromBlob(wavBlob);
-        setAppliedSemitones(0);
-        setPlaying(true);
-        const meta = await extractMetadata(wavBlob, 'audio');
-        addProcessedItem({
-            id: `${f.name}::0`,
-            type: 'audio',
-            label: f.name,
-            title: f.name,
-            src: URL.createObjectURL(wavBlob),
-            blob: wavBlob,
-            semitones: 0,
-            isYouTube: false,
-            fileName: f.name,
-            metadata: meta,
-        });
-      } else if (useWasm && isVideo(f)) {
-        const arrayBuffer = await f.arrayBuffer();
-        const audioCtx = new (
-          window.AudioContext || window.webkitAudioContext
-        )();
-        let audioBuffer;
-        try {
-          audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-        } catch (e) {
-          setTransposedSrc(null);
-          setAppError("Failed to decode audio from video file: " + e.message);
-          setProgress(0);
-          return;
-        }
-        const transposedBuffer = await transposeAudioBuffer(audioBuffer, 0);
-        const wavBlob = await audioBufferToWavBlob(transposedBuffer);
-        setProgress(60);
-        try {
-          const remuxedBlob = await remuxVideoWithAudio(f, wavBlob);
-          setTransposedFromBlob(remuxedBlob);
+      try {
+        if (useWasm && isAudio(f)) {
+          const arrayBuffer = await f.arrayBuffer();
+          const audioCtx = new (
+            window.AudioContext || window.webkitAudioContext
+          )();
+          const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+          const transposedBuffer = await transposeAudioBuffer(audioBuffer, 0);
+          const wavBlob = await audioBufferToWavBlob(transposedBuffer);
+          setTransposedFromBlob(wavBlob);
           setAppliedSemitones(0);
           setPlaying(true);
-          const meta = await extractMetadata(remuxedBlob, 'video');
+          const meta = await extractMetadata(wavBlob, 'audio');
           addProcessedItem({
-            id: `${f.name}::0`,
-            type: 'video',
-            label: f.name,
-            title: f.name,
-            src: URL.createObjectURL(remuxedBlob),
-            blob: remuxedBlob,
-            semitones: 0,
-            isYouTube: false,
-            fileName: f.name,
-            metadata: meta,
+              id: `${f.name}::0`,
+              type: 'audio',
+              label: f.name,
+              title: f.name,
+              src: URL.createObjectURL(wavBlob),
+              blob: wavBlob,
+              semitones: 0,
+              isYouTube: false,
+              fileName: f.name,
+              metadata: meta,
           });
-        } catch (e) {
-          setTransposedSrc(null);
-          setAppError("Video remuxing failed: " + e.message);
+        } else if (useWasm && isVideo(f)) {
+          const arrayBuffer = await f.arrayBuffer();
+          const audioCtx = new (
+            window.AudioContext || window.webkitAudioContext
+          )();
+          let audioBuffer;
+          try {
+            audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+          } catch (e) {
+            setTransposedSrc(null);
+            setAppError("Failed to decode audio from video file. The file may be corrupted or in an unsupported format. " + (e.message || ""));
+            setProgress(0);
+            return;
+          }
+          const transposedBuffer = await transposeAudioBuffer(audioBuffer, 0);
+          const wavBlob = await audioBufferToWavBlob(transposedBuffer);
+          setProgress(60);
+          try {
+            const remuxedBlob = await remuxVideoWithAudio(f, wavBlob);
+            setTransposedFromBlob(remuxedBlob);
+            setAppliedSemitones(0);
+            setPlaying(true);
+            const meta = await extractMetadata(remuxedBlob, 'video');
+            addProcessedItem({
+              id: `${f.name}::0`,
+              type: 'video',
+              label: f.name,
+              title: f.name,
+              src: URL.createObjectURL(remuxedBlob),
+              blob: remuxedBlob,
+              semitones: 0,
+              isYouTube: false,
+              fileName: f.name,
+              metadata: meta,
+            });
+          } catch (e) {
+            setTransposedSrc(null);
+            setAppError("Video remuxing failed. This may be due to an unsupported video format or a browser limitation. " + (e.message || ""));
+          }
+        } else {
+          const result = await transpose(f, 0, isAudio(f) ? "audio" : "video");
+          if (result) {
+            setTransposedFromBlob(result);
+            setAppliedSemitones(0);
+            setPlaying(true);
+            const meta = await extractMetadata(result, isAudio(f) ? 'audio' : 'video');
+            addProcessedItem({
+              id: `${f.name}::0`,
+              type: isAudio(f) ? 'audio' : 'video',
+              label: f.name,
+              title: f.name,
+              src: URL.createObjectURL(result),
+              blob: result,
+              semitones: 0,
+              isYouTube: false,
+              fileName: f.name,
+              metadata: meta,
+            });
+          }
         }
-      } else {
-        const result = await transpose(f, 0, isAudio(f) ? "audio" : "video");
-        if (result) {
-          setTransposedFromBlob(result);
-          setAppliedSemitones(0);
-          setPlaying(true);
-          const meta = await extractMetadata(result, isAudio(f) ? 'audio' : 'video');
-          addProcessedItem({
-            id: `${f.name}::0`,
-            type: isAudio(f) ? 'audio' : 'video',
-            label: f.name,
-            title: f.name,
-            src: URL.createObjectURL(result),
-            blob: result,
-            semitones: 0,
-            isYouTube: false,
-            fileName: f.name,
-            metadata: meta,
-          });
-        }
+        setProgress(100);
+      } catch (e) {
+        setTransposedSrc(null);
+        setAppError("File processing failed. Please check your file and try again. " + (e?.message || "Unknown error"));
+        setProgress(0);
       }
-      setProgress(100);
     }
   };
 
@@ -536,17 +551,80 @@ function App() {
   // Handle YouTube input: call backend API to extract and transpose audio
   // --- Handler: Process YouTube input and extract/transcode ---
     const handleYouTube = async (url) => {
+      // Always reset all relevant state before loading a new YouTube video
       setAppError("");
-      setYoutubeUrl(url);
+      setYoutubeUrl("");
       setFile(null);
       setShowOriginalYouTube(true);
       setYoutubeKey("");
       setSemitones(0);
-      setPendingSemitones(0);
+      setPendingSemitones(null);
       setAppliedSemitones(0);
       setTransposedSrc(null);
-      setProgress(10);
-      setIsProcessingYouTube(true);
+      setProgress(0);
+      setIsProcessingYouTube(false);
+      setTimeout(async () => {
+        setYoutubeUrl(url);
+        setProgress(10);
+        setIsProcessingYouTube(true);
+        try {
+          const blob = await fetchYouTubeTransposed(url, 0);
+          setTransposedFromBlob(blob);
+          setAppliedSemitones(0);
+          setPendingSemitones(null);
+          setQueuedDelta(0);
+          setShowOriginalYouTube(false);
+          setPlaying(true);
+          const meta = await extractMetadata(blob, 'audio');
+          let title = await fetchYouTubeTitle(url);
+          // Always save the original YouTube item to DB and reload processedItems
+          // Remove any non-serializable/circular properties before saving
+          const serializableItem = {
+            id: `${url}::0`,
+            type: 'youtube',
+            label: title || url,
+            title: title || url,
+            src: URL.createObjectURL(blob),
+            blob: blob,
+            semitones: 0,
+            isYouTube: true,
+            youtubeUrl: url,
+            metadata: meta,
+          };
+          await saveProcessedItem(serializableItem);
+          const dbItems = await getAllProcessedItems();
+          setProcessedItems(dbItems);
+          localStorage.setItem("transpose_processedItems", JSON.stringify(dbItems));
+          // Auto-detect original key so key labels are always populated.
+          if (keyCacheRef.current.has(url)) {
+            setYoutubeKey(keyCacheRef.current.get(url));
+          } else {
+            setIsAnalyzingKey(true);
+            try {
+              const keyResp = await fetch(`${API_BASE_URL}/api/youtube-key`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ url }),
+              });
+              if (keyResp.ok) {
+                const keyData = await keyResp.json();
+                const detected = keyData?.key || "Unknown";
+                keyCacheRef.current.set(url, detected);
+                setYoutubeKey(detected);
+              }
+            } finally {
+              setIsAnalyzingKey(false);
+            }
+          }
+        } catch (e) {
+          if (e.name === "AbortError") return;
+          setTransposedSrc(null);
+          setAppError("YouTube processing failed: " + (e?.message || "Unknown error"));
+        } finally {
+          setIsProcessingYouTube(false);
+        }
+        setProgress(100);
+      }, 0);
       try {
         const blob = await fetchYouTubeTransposed(url, 0);
         setTransposedFromBlob(blob);
@@ -729,13 +807,16 @@ function App() {
     if (youtubeDebounceTimerRef.current) {
       clearTimeout(youtubeDebounceTimerRef.current);
     }
-    if (youtubeUrl) {
+    // Only allow transpose if not processing
+    if (youtubeUrl && !isProcessingYouTube) {
       youtubeDebounceTimerRef.current = setTimeout(() => {
         runTranspose(newSemitones);
       }, 250);
       return;
     }
-    runTranspose(newSemitones);
+    if (!isProcessingYouTube) {
+      runTranspose(newSemitones);
+    }
   };
 
   // --- Handler: Reset transpose to zero ---
@@ -748,6 +829,10 @@ function App() {
     const url = urlOverride || youtubeUrl;
     if (!url) {
       setAppError("Load a YouTube URL first.");
+      return;
+    }
+    if (isProcessingYouTube) {
+      setAppError("Wait for YouTube processing to finish before analyzing key.");
       return;
     }
     setAppError("");
@@ -878,23 +963,24 @@ function App() {
           )}
 
           <YouTubeInput onSubmit={handleYouTube} disabled={processing || isProcessingYouTube} />
-                 <PlayerSection
-                file={file}
-                youtubeUrl={youtubeUrl}
-                transposedSrc={transposedSrc}
-                playing={playing}
-                setPlaying={setPlaying}
-                processing={processing}
-                isProcessingYouTube={isProcessingYouTube}
-                seekTo={seekTo}
-                semitones={semitones}
-                appliedSemitones={appliedSemitones}
-                isAudio={isAudio}
-                isVideo={isVideo}
-                AudioPlayer={AudioPlayer}
-                VideoPlayer={VideoPlayer}
-                processedItems={processedItems}
-              />
+          <PlayerSection
+            file={file}
+            youtubeUrl={youtubeUrl}
+            transposedSrc={transposedSrc}
+            playing={playing}
+            setPlaying={setPlaying}
+            processing={processing}
+            isProcessingYouTube={isProcessingYouTube}
+            seekTo={seekTo}
+            semitones={semitones}
+            appliedSemitones={appliedSemitones}
+            isAudio={isAudio}
+            isVideo={isVideo}
+            AudioPlayer={AudioPlayer}
+            VideoPlayer={VideoPlayer}
+            processedItems={processedItems}
+            controlsDisabled={processing || isProcessingYouTube}
+          />
 
 {youtubeUrl && (
                 <div
@@ -990,7 +1076,7 @@ function App() {
               <DownloadShare
                 onDownload={handleDownload}
                 onShare={handleShare}
-                disabled={!transposedSrc}
+                disabled={!transposedSrc || processing || isProcessingYouTube}
                 formats={OUTPUT_FORMATS}
                 selectedFormat={outputFormat}
                 onFormatChange={setOutputFormat}
