@@ -14,8 +14,18 @@ import useTransposer from "./hooks/useTransposer";
 import { isAudio } from "./utils/audioUtils";
 import { isVideo } from "./utils/videoUtils";
 import { remuxVideoWithAudio } from "./utils/videoRemuxer";
+import { saveProcessedItem, deleteProcessedItem, getAllProcessedItems, clearAllProcessedItems } from "./utils/db";
+
+
+import Notice from "./components/Notice";
+import YouTubeKeyAnalysis from "./components/YouTubeKeyAnalysis";
+import KeySelector from "./components/KeySelector";
+import YouTubePlayer from "./components/YouTubePlayer";
+import PlayerSection from "./components/PlayerSection";
+import ProcessedHistory from "./components/ProcessedHistory";
 import "./App.css";
 
+// --- Constants and Note Mappings ---
 const OUTPUT_FORMATS = ["mp3", "mp4"];
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000";
 const CHROMATIC_NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -44,22 +54,8 @@ const NOTE_TO_INDEX = {
   Cb: 11,
 };
 
-function getYouTubeVideoId(url) {
-  if (!url) return "";
-  try {
-    const parsed = new URL(url);
-    if (parsed.hostname.includes("youtu.be")) {
-      return parsed.pathname.replace("/", "");
-    }
-    if (parsed.pathname.startsWith("/shorts/")) {
-      return parsed.pathname.split("/shorts/")[1]?.split("/")[0] || "";
-    }
-    return parsed.searchParams.get("v") || "";
-  } catch {
-    return "";
-  }
-}
 
+// --- Utility: Transpose a detected key label by semitones ---
 function transposeDetectedKey(keyLabel, semitoneShift) {
   if (!keyLabel) return "";
   const trimmed = keyLabel.trim();
@@ -73,33 +69,207 @@ function transposeDetectedKey(keyLabel, semitoneShift) {
   return quality ? `${nextRoot} ${quality}` : nextRoot;
 }
 
+// --- Main App Component ---
 function App() {
+    // --- State: Processed items history (persisted in IndexedDB) ---
+    const [processedItems, setProcessedItems] = useState([]);
+
+    // --- On mount: Load processed items from IndexedDB (and fallback to localStorage for legacy) ---
+    useEffect(() => {
+      let mounted = true;
+      (async () => {
+        try {
+          const dbItems = await getAllProcessedItems();
+          if (mounted && dbItems && dbItems.length > 0) {
+            setProcessedItems(dbItems);
+            localStorage.setItem("transpose_processedItems", JSON.stringify(dbItems));
+          } else {
+            // Fallback: load from localStorage if DB empty (legacy)
+            const saved = localStorage.getItem("transpose_processedItems");
+            if (saved) {
+              const items = JSON.parse(saved);
+              setProcessedItems(items);
+            }
+          }
+        } catch {
+          // fallback to localStorage
+          const saved = localStorage.getItem("transpose_processedItems");
+          if (saved) {
+            const items = JSON.parse(saved);
+            setProcessedItems(items);
+          }
+        }
+      })();
+      return () => { mounted = false; };
+    }, []);
+
+    // --- Helper: Add a processed item to history (max 10, no duplicates) ---
+    // Always save to DB, and reload from DB after saving to ensure UI is in sync
+    // Recursively remove non-serializable/circular properties from an object
+    function toSerializable(obj, seen = new WeakSet()) {
+      if (obj === null || typeof obj !== 'object') return obj;
+      if (seen.has(obj)) return undefined;
+      seen.add(obj);
+      if (obj instanceof Blob) return obj; // allow Blob for IndexedDB
+      if (obj instanceof Date) return obj;
+      if (Array.isArray(obj)) return obj.map(v => toSerializable(v, seen));
+      if (
+        obj instanceof HTMLElement ||
+        obj instanceof EventTarget ||
+        (obj.constructor && obj.constructor.name && obj.constructor.name.includes('FiberNode'))
+      ) {
+        return undefined;
+      }
+      const out = {};
+      for (const k in obj) {
+        const v = obj[k];
+        if (typeof v === 'function') continue;
+        const ser = toSerializable(v, seen);
+        if (ser !== undefined) out[k] = ser;
+      }
+      return out;
+    }
+
+    const addProcessedItem = (item) => {
+      const serializableItem = toSerializable(item);
+      saveProcessedItem(serializableItem)
+        .then(() => getAllProcessedItems())
+        .then((dbItems) => {
+          setProcessedItems(dbItems);
+          localStorage.setItem("transpose_processedItems", JSON.stringify(dbItems));
+        })
+        .catch(() => {
+          // fallback to localStorage logic
+          setProcessedItems((prev) => {
+            const exists = prev.some((x) => x.id === serializableItem.id);
+            const next = exists ? prev : [serializableItem, ...prev];
+            const trimmed = next.slice(0, 10);
+            localStorage.setItem("transpose_processedItems", JSON.stringify(trimmed));
+            return trimmed;
+          });
+        });
+    };
+
+    // --- Handler: Delete a processed item from history and DB ---
+    const handleDeleteProcessed = (id) => {
+      setProcessedItems((prev) => {
+        const filtered = prev.filter((item) => item.id !== id);
+        localStorage.setItem("transpose_processedItems", JSON.stringify(filtered));
+        // Delete from IndexedDB
+        deleteProcessedItem(id).catch(() => {});
+        return filtered;
+      });
+    };
+
+    // --- Helper: Fetch YouTube video title using oEmbed ---
+    async function fetchYouTubeTitle(url) {
+      try {
+        const api = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
+        const resp = await fetch(api);
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        return data.title || null;
+      } catch {
+        return null;
+      }
+    }
+
+    // --- Helper: Extract metadata from audio/video blob ---
+    const extractMetadata = async (blob, type) => {
+      return new Promise((resolve) => {
+        if (type === 'audio') {
+          const audio = document.createElement('audio');
+          audio.src = URL.createObjectURL(blob);
+          audio.addEventListener('loadedmetadata', () => {
+            resolve({
+              duration: audio.duration,
+              sampleRate: audio.mozSampleRate || undefined,
+              channels: audio.mozChannels || undefined,
+            });
+            URL.revokeObjectURL(audio.src);
+          });
+        } else if (type === 'video') {
+          const video = document.createElement('video');
+          video.src = URL.createObjectURL(blob);
+          video.addEventListener('loadedmetadata', () => {
+            resolve({
+              duration: video.duration,
+              width: video.videoWidth,
+              height: video.videoHeight,
+            });
+            URL.revokeObjectURL(video.src);
+          });
+        } else {
+          resolve({});
+        }
+      });
+    };
+
+    // --- Handler: Instantly load and play a processed item from history ---
+    const handleLoadProcessed = (item) => {
+      // Always create a new object URL for the blob to avoid stale/revoked URLs
+      if (item.blob) {
+        setTransposedSrc((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return URL.createObjectURL(item.blob);
+        });
+      } else {
+        setTransposedSrc(item.src); // fallback for legacy items
+      }
+      setSemitones(item.semitones);
+      setAppliedSemitones(item.semitones);
+      setPendingSemitones(null);
+      if (item.isYouTube) {
+        setYoutubeUrl(item.youtubeUrl);
+        setFile(null);
+        setShowOriginalYouTube(false);
+        if (item.metadata && item.metadata.key) {
+          setYoutubeKey(item.metadata.key);
+        } else {
+          setYoutubeKey("");
+          // Automatically trigger key analysis after a short delay
+          setTimeout(() => {
+            handleAnalyzeKey(item.youtubeUrl);
+          }, 1000);
+        }
+      } else {
+        setFile(null); // Always null to force reload
+        setYoutubeUrl("");
+        setShowOriginalYouTube(true);
+        setYoutubeKey("");
+      }
+      // Delay playing until after src is set to ensure player reloads
+      setTimeout(() => setPlaying(true), 0);
+      showNotice("success", `Loaded from history: ${item.label}`);
+    };
+  // --- State: Main app state variables ---
   const { file, setFile, error: fileError } = useFileHandler();
   const { transpose, processing, error: transError } = useTransposer();
-  const [appError, setAppError] = useState("");
-  const [youtubeUrl, setYoutubeUrl] = useState("");
-  const [semitones, setSemitones] = useState(0);
-  const [outputFormat, setOutputFormat] = useState(OUTPUT_FORMATS[0]);
-  const [transposedSrc, setTransposedSrc] = useState(null);
-  const [playing, setPlaying] = useState(false);
-  const [seekTo, setSeekTo] = useState(null);
-  const [progress, setProgress] = useState(0);
+  const [appError, setAppError] = useState(""); // Error messages
+  const [youtubeUrl, setYoutubeUrl] = useState(""); // Current YouTube URL
+  const [semitones, setSemitones] = useState(0); // Current transpose value
+  const [outputFormat, setOutputFormat] = useState(OUTPUT_FORMATS[0]); // Output format
+  const [transposedSrc, setTransposedSrc] = useState(null); // Current transposed audio/video src
+  const [playing, setPlaying] = useState(false); // Is player playing
+  const [seekTo, setSeekTo] = useState(null); // Seek position
+  const [progress, setProgress] = useState(0); // Progress bar
   const [useWasm, setUseWasm] = useState(true); // Toggle for in-browser transposition
-  const [showOriginalYouTube, setShowOriginalYouTube] = useState(true);
-  const [isProcessingYouTube, setIsProcessingYouTube] = useState(false);
-  const [youtubeKey, setYoutubeKey] = useState("");
-  const [isAnalyzingKey, setIsAnalyzingKey] = useState(false);
-  const [pendingSemitones, setPendingSemitones] = useState(null);
-  const [appliedSemitones, setAppliedSemitones] = useState(0);
-  const [queuedDelta, setQueuedDelta] = useState(0);
-  const [processingDots, setProcessingDots] = useState(".");
-  const [keyAnalyzeDots, setKeyAnalyzeDots] = useState(".");
-  const [notice, setNotice] = useState(null);
-  const youtubeTransposeAbortRef = useRef(null);
-  const youtubeDebounceTimerRef = useRef(null);
-  const youtubeCacheRef = useRef(new Map());
-  const keyCacheRef = useRef(new Map());
+  const [showOriginalYouTube, setShowOriginalYouTube] = useState(true); // Show original YouTube video
+  const [isProcessingYouTube, setIsProcessingYouTube] = useState(false); // Is YouTube processing
+  const [youtubeKey, setYoutubeKey] = useState(""); // Detected YouTube key
+  const [isAnalyzingKey, setIsAnalyzingKey] = useState(false); // Is key being analyzed
+  const [pendingSemitones, setPendingSemitones] = useState(null); // Pending transpose
+  const [appliedSemitones, setAppliedSemitones] = useState(0); // Last applied transpose
+  const [queuedDelta, setQueuedDelta] = useState(0); // Queued transpose delta
+  const [processingDots, setProcessingDots] = useState("."); // Dots animation for processing
+  const [keyAnalyzeDots, setKeyAnalyzeDots] = useState("."); // Dots animation for key analysis
+  const [notice, setNotice] = useState(null); // Notice messages
+  const youtubeTransposeAbortRef = useRef(null); // Abort controller for YouTube
+  const youtubeDebounceTimerRef = useRef(null); // Debounce timer for YouTube
+  const youtubeCacheRef = useRef(new Map()); // Cache for YouTube blobs
+  const keyCacheRef = useRef(new Map()); // Cache for detected keys
 
+  // --- Helper: Set transposedSrc from a Blob, revoking previous URL ---
   const setTransposedFromBlob = (blob) => {
     if (!blob) return;
     setTransposedSrc((prev) => {
@@ -108,15 +278,18 @@ function App() {
     });
   };
 
+  // --- Helper: Show a notice message ---
   const showNotice = (type, message) => {
     setNotice({ type, message });
   };
 
+  // --- Helper: Format semitone label for display ---
   const formatSemitoneLabel = (value) => {
     const prefix = value > 0 ? `+${value}` : `${value}`;
     return `${prefix} semitone${Math.abs(value) === 1 ? "" : "s"}`;
   };
 
+  // --- Effects: Persist settings and animate dots ---
   useEffect(() => {
     const savedUseWasm = localStorage.getItem("transpose_useWasm");
     const savedFormat = localStorage.getItem("transpose_outputFormat");
@@ -174,6 +347,7 @@ function App() {
     };
   }, [transposedSrc]);
 
+  // --- Helper: Pretty-print API error messages ---
   const prettyApiError = (fallbackMessage, payloadText = "") => {
     const text = (payloadText || "").toLowerCase();
     if (text.includes("proxy") || text.includes("403")) {
@@ -188,6 +362,7 @@ function App() {
     return fallbackMessage;
   };
 
+  // --- Helper: Fetch transposed YouTube audio/video from backend ---
   const fetchYouTubeTransposed = async (url, newSemitones) => {
     const cacheKey = `${url}::${newSemitones}`;
     if (youtubeCacheRef.current.has(cacheKey)) {
@@ -212,6 +387,7 @@ function App() {
   };
 
   // Automatically process and play file or YouTube link on load
+  // --- Handler: File upload and initial processing ---
   const handleFileSelect = async (f) => {
     setAppError("");
     setFile(f);
@@ -225,7 +401,6 @@ function App() {
     if (f) {
       setProgress(10);
       if (useWasm && isAudio(f)) {
-        // In-browser WASM transposition for audio files
         const arrayBuffer = await f.arrayBuffer();
         const audioCtx = new (
           window.AudioContext || window.webkitAudioContext
@@ -236,14 +411,24 @@ function App() {
         setTransposedFromBlob(wavBlob);
         setAppliedSemitones(0);
         setPlaying(true);
+        const meta = await extractMetadata(wavBlob, 'audio');
+        addProcessedItem({
+            id: `${f.name}::0`,
+            type: 'audio',
+            label: f.name,
+            title: f.name,
+            src: URL.createObjectURL(wavBlob),
+            blob: wavBlob,
+            semitones: 0,
+            isYouTube: false,
+            fileName: f.name,
+            metadata: meta,
+        });
       } else if (useWasm && isVideo(f)) {
-        // In-browser WASM transposition for video files (remux with ffmpeg.wasm)
-        // 1. Extract audio from video
         const arrayBuffer = await f.arrayBuffer();
         const audioCtx = new (
           window.AudioContext || window.webkitAudioContext
         )();
-        // Decode audio from video file
         let audioBuffer;
         try {
           audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
@@ -253,16 +438,27 @@ function App() {
           setProgress(0);
           return;
         }
-        // 2. Transpose audio
         const transposedBuffer = await transposeAudioBuffer(audioBuffer, 0);
         const wavBlob = await audioBufferToWavBlob(transposedBuffer);
-        // 3. Remux video with new audio
         setProgress(60);
         try {
           const remuxedBlob = await remuxVideoWithAudio(f, wavBlob);
           setTransposedFromBlob(remuxedBlob);
           setAppliedSemitones(0);
           setPlaying(true);
+          const meta = await extractMetadata(remuxedBlob, 'video');
+          addProcessedItem({
+            id: `${f.name}::0`,
+            type: 'video',
+            label: f.name,
+            title: f.name,
+            src: URL.createObjectURL(remuxedBlob),
+            blob: remuxedBlob,
+            semitones: 0,
+            isYouTube: false,
+            fileName: f.name,
+            metadata: meta,
+          });
         } catch (e) {
           setTransposedSrc(null);
           setAppError("Video remuxing failed: " + e.message);
@@ -273,6 +469,19 @@ function App() {
           setTransposedFromBlob(result);
           setAppliedSemitones(0);
           setPlaying(true);
+          const meta = await extractMetadata(result, isAudio(f) ? 'audio' : 'video');
+          addProcessedItem({
+            id: `${f.name}::0`,
+            type: isAudio(f) ? 'audio' : 'video',
+            label: f.name,
+            title: f.name,
+            src: URL.createObjectURL(result),
+            blob: result,
+            semitones: 0,
+            isYouTube: false,
+            fileName: f.name,
+            metadata: meta,
+          });
         }
       }
       setProgress(100);
@@ -280,6 +489,7 @@ function App() {
   };
 
   // Helper: Convert AudioBuffer to WAV Blob
+  // --- Helper: Convert AudioBuffer to WAV Blob ---
   async function audioBufferToWavBlob(audioBuffer) {
     // PCM 16-bit WAV encoding
     const numChannels = audioBuffer.numberOfChannels;
@@ -324,60 +534,82 @@ function App() {
   }
 
   // Handle YouTube input: call backend API to extract and transpose audio
-  const handleYouTube = async (url) => {
-    setAppError("");
-    setYoutubeUrl(url);
-    setFile(null);
-    setShowOriginalYouTube(true);
-    setYoutubeKey("");
-    setSemitones(0);
-    setPendingSemitones(0);
-    setAppliedSemitones(0);
-    setTransposedSrc(null);
-    setProgress(10);
-    setIsProcessingYouTube(true);
-    try {
-      const blob = await fetchYouTubeTransposed(url, 0);
-      setTransposedFromBlob(blob);
+  // --- Handler: Process YouTube input and extract/transcode ---
+    const handleYouTube = async (url) => {
+      setAppError("");
+      setYoutubeUrl(url);
+      setFile(null);
+      setShowOriginalYouTube(true);
+      setYoutubeKey("");
+      setSemitones(0);
+      setPendingSemitones(0);
       setAppliedSemitones(0);
-      setPendingSemitones(null);
-      setQueuedDelta(0);
-      setShowOriginalYouTube(false);
-      setPlaying(true);
-      // Auto-detect original key so key labels are always populated.
-      if (keyCacheRef.current.has(url)) {
-        setYoutubeKey(keyCacheRef.current.get(url));
-      } else {
-        setIsAnalyzingKey(true);
-        try {
-          const keyResp = await fetch(`${API_BASE_URL}/api/youtube-key`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url }),
-          });
-          if (keyResp.ok) {
-            const keyData = await keyResp.json();
-            const detected = keyData?.key || "Unknown";
-            keyCacheRef.current.set(url, detected);
-            setYoutubeKey(detected);
-          }
-        } finally {
-          setIsAnalyzingKey(false);
-        }
-      }
-    } catch (e) {
-      if (e.name === "AbortError") return;
       setTransposedSrc(null);
-      setAppError("YouTube processing failed: " + (e?.message || "Unknown error"));
-    } finally {
-      setIsProcessingYouTube(false);
-    }
-    setProgress(100);
-  };
+      setProgress(10);
+      setIsProcessingYouTube(true);
+      try {
+        const blob = await fetchYouTubeTransposed(url, 0);
+        setTransposedFromBlob(blob);
+        setAppliedSemitones(0);
+        setPendingSemitones(null);
+        setQueuedDelta(0);
+        setShowOriginalYouTube(false);
+        setPlaying(true);
+        const meta = await extractMetadata(blob, 'audio');
+        let title = await fetchYouTubeTitle(url);
+        // Always save the original YouTube item to DB and reload processedItems
+        // Remove any non-serializable/circular properties before saving
+        const serializableItem = {
+          id: `${url}::0`,
+          type: 'youtube',
+          label: title || url,
+          title: title || url,
+          src: URL.createObjectURL(blob),
+          blob: blob,
+          semitones: 0,
+          isYouTube: true,
+          youtubeUrl: url,
+          metadata: meta,
+        };
+        await saveProcessedItem(serializableItem);
+        const dbItems = await getAllProcessedItems();
+        setProcessedItems(dbItems);
+        localStorage.setItem("transpose_processedItems", JSON.stringify(dbItems));
+        // Auto-detect original key so key labels are always populated.
+        if (keyCacheRef.current.has(url)) {
+          setYoutubeKey(keyCacheRef.current.get(url));
+        } else {
+          setIsAnalyzingKey(true);
+          try {
+            const keyResp = await fetch(`${API_BASE_URL}/api/youtube-key`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url }),
+            });
+            if (keyResp.ok) {
+              const keyData = await keyResp.json();
+              const detected = keyData?.key || "Unknown";
+              keyCacheRef.current.set(url, detected);
+              setYoutubeKey(detected);
+            }
+          } finally {
+            setIsAnalyzingKey(false);
+          }
+        }
+      } catch (e) {
+        if (e.name === "AbortError") return;
+        setTransposedSrc(null);
+        setAppError("YouTube processing failed: " + (e?.message || "Unknown error"));
+      } finally {
+        setIsProcessingYouTube(false);
+      }
+      setProgress(100);
+    };
 
   // Real-time transposition and playback
 
   // Real-time transposition and playback, including YouTube
+  // --- Handler: Real-time transposition and playback ---
   const runTranspose = async (newSemitones) => {
     setAppError("");
     // Save playback position if possible
@@ -399,6 +631,21 @@ function App() {
         setShowOriginalYouTube(false);
         setSeekTo(currentTime);
         setPlaying(true);
+        // Save processed YouTube transposition to DB/history
+        let title = await fetchYouTubeTitle(youtubeUrl);
+        const meta = await extractMetadata(blob, 'audio');
+        addProcessedItem({
+          id: `${youtubeUrl}::${newSemitones}`,
+          type: 'youtube',
+          label: title || youtubeUrl,
+          title: title || youtubeUrl,
+          src: URL.createObjectURL(blob),
+          blob: blob,
+          semitones: newSemitones,
+          isYouTube: true,
+          youtubeUrl: youtubeUrl,
+          metadata: meta,
+        });
       } catch (e) {
         if (e.name === "AbortError") return;
         setTransposedSrc(null);
@@ -474,6 +721,7 @@ function App() {
     setProgress(100);
   };
 
+  // --- Handler: User changes transpose value ---
   const handleTranspose = (newSemitones) => {
     setSemitones(newSemitones);
     setPendingSemitones(newSemitones);
@@ -490,26 +738,29 @@ function App() {
     runTranspose(newSemitones);
   };
 
+  // --- Handler: Reset transpose to zero ---
   const handleResetTranspose = () => {
     handleTranspose(0);
   };
 
-  const handleAnalyzeKey = async () => {
-    if (!youtubeUrl) {
+  // --- Handler: Analyze song key for YouTube (optionally with override URL) ---
+  const handleAnalyzeKey = async (urlOverride) => {
+    const url = urlOverride || youtubeUrl;
+    if (!url) {
       setAppError("Load a YouTube URL first.");
       return;
     }
     setAppError("");
     setIsAnalyzingKey(true);
     try {
-      if (keyCacheRef.current.has(youtubeUrl)) {
-        setYoutubeKey(keyCacheRef.current.get(youtubeUrl));
+      if (keyCacheRef.current.has(url)) {
+        setYoutubeKey(keyCacheRef.current.get(url));
         return;
       }
       const response = await fetch(`${API_BASE_URL}/api/youtube-key`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: youtubeUrl }),
+        body: JSON.stringify({ url }),
       });
       if (!response.ok) {
         const errText = await response.text();
@@ -517,7 +768,7 @@ function App() {
       }
       const data = await response.json();
       const detected = data?.key || "Unknown";
-      keyCacheRef.current.set(youtubeUrl, detected);
+      keyCacheRef.current.set(url, detected);
       setYoutubeKey(detected);
     } catch (e) {
       setAppError("Key analysis failed: " + (e?.message || "Unknown error"));
@@ -530,11 +781,32 @@ function App() {
   const currentKeyLabel = youtubeKey
     ? transposeDetectedKey(youtubeKey, appliedSemitones)
     : "Unknown";
-  const keyFeedback = isAnalyzingKey
-    ? "Analyzing key from audio..."
-    : youtubeKey
-      ? "Key analysis complete."
-      : "Key not analyzed yet.";
+  // Compose keyFeedback as a styled React element
+  let keyFeedback = null;
+  if (isAnalyzingKey) {
+    keyFeedback = (
+      <span style={{ color: "#f6e05e" }}>Analyzing key from audio...</span>
+    );
+  } else if ((isProcessingYouTube || processing) && pendingSemitones !== null) {
+    const feedbackText = `Applying ${formatSemitoneLabel(pendingSemitones)}${processingDots}`;
+    const queuedText = queuedDelta !== 0 ? `Queued: ${queuedDelta > 0 ? "+" : ""}${queuedDelta} (latest)` : null;
+    keyFeedback = (
+      <>
+        <div style={{ color: "#f6e05e" }}>{feedbackText}</div>
+        {queuedText && (
+          <div style={{ color: "#f6ad55", fontSize: 12, marginTop: 2 }}>{queuedText}</div>
+        )}
+      </>
+    );
+  } else if (youtubeKey) {
+    keyFeedback = (
+      <span style={{ color: "#9ae6b4" }}>Applied {formatSemitoneLabel(appliedSemitones)}</span>
+    );
+  } else {
+    keyFeedback = (
+      <span style={{ color: "#9ae6b4" }}>Key not analyzed yet.</span>
+    );
+  }
 
   // Download/share handlers (placeholders)
   const handleDownload = () => {
@@ -578,313 +850,156 @@ function App() {
     return () => clearInterval(interval);
   }, [transposedSrc, file, youtubeUrl]);
 
+  // Handler: Clear all processed items from DB and update state
+  const handleClearProcessed = async () => {
+    await clearAllProcessedItems();
+    setProcessedItems([]);
+  };
+
   return (
     <div className='App'>
       <main className="app-shell">
         <h1 className="app-title">Transpose App</h1>
-      <div className="app-card">
-        <FileUpload onFileSelect={handleFileSelect} disabled={processing || isProcessingYouTube} />
-        <YouTubeInput onSubmit={handleYouTube} disabled={processing || isProcessingYouTube} />
-        {notice && (
-          <div
-            style={{
-              margin: "8px 0 10px",
-              padding: "8px 10px",
-              borderRadius: 6,
-              fontSize: 13,
-              background: notice.type === "success" ? "#1f3b2b" : "#2d3748",
-              border: `1px solid ${notice.type === "success" ? "#38a169" : "#4a5568"}`,
-              color: notice.type === "success" ? "#9ae6b4" : "#e2e8f0",
-            }}
-          >
-            {notice.message}
-          </div>
-        )}
-        <ErrorDisplay error={appError || fileError || transError} />
-        {(file || youtubeUrl) && (
-          <>
-            <div style={{ textAlign: "center", marginBottom: 8 }}>
-              <label style={{ color: "#fff", marginRight: 8 }}>
-                <input
-                  type='checkbox'
-                  checked={useWasm}
-                  onChange={(e) => setUseWasm(e.target.checked)}
-                  disabled={processing}
-                  style={{ marginRight: 4 }}
-                />
-                Use in-browser (WASM) transposition
-              </label>
-            </div>
-            <TransposeControls
-              value={semitones}
-              min={-12}
-              max={12}
-              onChange={handleTranspose}
-              onReset={handleResetTranspose}
-              disabled={processing || isProcessingYouTube}
-            />
-            {(pendingSemitones !== null || transposedSrc) && (
-              <div style={{ textAlign: "center", marginBottom: 8, fontSize: 13 }}>
-                {(isProcessingYouTube || processing) && pendingSemitones !== null ? (
-                  <>
-                    <div style={{ color: "#f6e05e" }}>
-                      Applying {formatSemitoneLabel(pendingSemitones)}
-                      {processingDots}
-                    </div>
-                    {queuedDelta !== 0 && (
-                      <div style={{ color: "#f6ad55", fontSize: 12, marginTop: 2 }}>
-                        Queued: {queuedDelta > 0 ? "+" : ""}
-                        {queuedDelta} (latest)
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <span style={{ color: "#9ae6b4" }}>
-                    Applied {formatSemitoneLabel(appliedSemitones)}
-                  </span>
-                )}
-              </div>
-            )}
-            {youtubeUrl && (
-              <div style={{ textAlign: "center", marginBottom: 8 }}>
-                <button
-                  onClick={handleAnalyzeKey}
-                  disabled={isAnalyzingKey || isProcessingYouTube}
-                  style={{
-                    padding: "6px 10px",
-                    borderRadius: 4,
-                    border: "none",
-                    background: "#2d3748",
-                    color: "#fff",
-                  }}
-                >
-                  {isAnalyzingKey ? "Analyzing key..." : "Analyze song key"}
-                </button>
-                <div
-                  style={{
-                    marginTop: 6,
-                    fontSize: 12,
-                    color: isAnalyzingKey ? "#f6e05e" : youtubeKey ? "#9ae6b4" : "#a0aec0",
-                  }}
-                >
-                  {keyFeedback}
-                </div>
-                {isAnalyzingKey && (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      padding: "6px 10px",
-                      borderRadius: 6,
-                      background: "#3b3415",
-                      border: "1px solid #d69e2e",
-                      color: "#f6e05e",
-                      fontSize: 12,
-                      display: "inline-block",
-                    }}
-                  >
-                    Analyzing song key{keyAnalyzeDots}
-                  </div>
-                )}
-                {/* Key Selector: show after key analysis, support major/minor */}
-                {!isAnalyzingKey && youtubeKey && (
-                  <div style={{ marginTop: 12 }}>
-                    <div style={{ color: "#9ae6b4", fontWeight: 600, marginBottom: 4 }}>
-                      Select a key to transpose:
-                    </div>
-                    <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 6 }}>
-                      {["major", "minor"].map((mode) => (
-                        <div key={mode} style={{ margin: "0 8px" }}>
-                          <div style={{ color: "#a0aec0", fontSize: 12, marginBottom: 2, textAlign: "center" }}>{mode.charAt(0).toUpperCase() + mode.slice(1)}</div>
-                          {CHROMATIC_NOTES.map((note, i) => {
-                            // Compose key label (e.g. C major, C# minor)
-                            const keyLabel = `${note} ${mode}`;
-                            // If original key is flat, show flats for selector
-                            const prefersFlat = youtubeKey.includes("b");
-                            const noteName = prefersFlat ? CHROMATIC_NOTES_FLAT[i] : note;
-                            const label = `${noteName} ${mode}`;
-                            // Compute semitone shift from detected key to this key
-                            const [origRoot, ...origRest] = youtubeKey.trim().split(/\s+/);
-                            const origMode = (origRest.join(" ").toLowerCase().includes("minor")) ? "minor" : "major";
-                            const origIdx = NOTE_TO_INDEX[origRoot];
-                            const targetIdx = NOTE_TO_INDEX[note];
-                            let shift = null;
-                            if (origIdx != null && targetIdx != null) {
-                              // Only allow mode match (major->major, minor->minor)
-                              if (origMode === mode) {
-                                shift = (targetIdx - origIdx + 12) % 12;
-                                // If shift > 6, prefer negative direction for musical sense
-                                if (shift > 6) shift -= 12;
-                              }
-                            }
-                            const isCurrent = shift !== null && shift === appliedSemitones && origMode === mode;
-                            return (
-                              <button
-                                key={label}
-                                disabled={shift === null || processing || isProcessingYouTube}
-                                style={{
-                                  margin: 2,
-                                  padding: "4px 10px",
-                                  borderRadius: 4,
-                                  border: isCurrent ? "2px solid #38a169" : "1px solid #4a5568",
-                                  background: isCurrent ? "#22543d" : "#2d3748",
-                                  color: isCurrent ? "#9ae6b4" : "#e2e8f0",
-                                  fontWeight: isCurrent ? 700 : 400,
-                                  opacity: shift === null ? 0.4 : 1,
-                                  cursor: shift === null ? "not-allowed" : "pointer",
-                                  minWidth: 38,
-                                }}
-                                onClick={() => {
-                                  if (shift !== null) handleTranspose(shift);
-                                }}
-                              >
-                                {label}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{ color: "#a0aec0", fontSize: 11, marginTop: 4 }}>
-                      Only keys matching the original mode are enabled.
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-            {youtubeUrl && (
-              <div
-                style={{
-                  textAlign: "center",
-                  marginBottom: 8,
-                  fontSize: 13,
-                  color: "#cbd5e0",
-                }}
-              >
-                <span style={{ marginRight: 12 }}>
-                  Original key: <span style={{ color: "#90cdf4" }}>{originalKeyLabel}</span>
-                </span>
-                <span>
-                  Current key: <span style={{ color: "#9ae6b4" }}>{currentKeyLabel}</span>
-                </span>
-              </div>
-            )}
+        <div className="app-card">
+          <ProcessedHistory processedItems={processedItems} onLoad={handleLoadProcessed} onDelete={handleDeleteProcessed} onClear={handleClearProcessed} onRefresh={async () => {
+            const dbItems = await getAllProcessedItems();
+            setProcessedItems(dbItems);
+          }} />
+
+          {(processing || isProcessingYouTube || ((file || youtubeUrl) && progress < 100)) && (
             <ProgressBar
               progress={progress}
               label={
-                processing || isProcessingYouTube || progress < 100
+                (processing || isProcessingYouTube || ((file || youtubeUrl) && progress < 100))
                   ? "Processing transposed audio..."
                   : ""
               }
             />
-            {youtubeUrl && (
-              <div
-                style={{
-                  textAlign: "center",
-                  fontSize: 12,
-                  color: "#a0aec0",
-                  marginTop: 2,
-                  marginBottom: 8,
-                }}
-              >
-                {isProcessingYouTube
-                  ? "Fetching YouTube audio and applying pitch shift. This can take 10-60 seconds."
-                  : "Tip: use +/- for quick transpose previews; latest request is applied."}
-              </div>
-            )}
-            {/* Show YouTube player if a YouTube URL is present */}
-            {youtubeUrl && showOriginalYouTube && (
-              <div style={{ margin: "16px 0" }}>
-                <div
-                  style={{
-                    position: "relative",
-                    paddingBottom: "56.25%",
-                    height: 0,
-                    overflow: "hidden",
-                    borderRadius: 8,
-                    background: "#000",
-                  }}
-                >
-                  <iframe
-                    title='YouTube Player'
-                    src={`https://www.youtube.com/embed/${getYouTubeVideoId(youtubeUrl)}?autoplay=0&mute=1`}
-                    frameBorder='0'
-                    allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture'
-                    allowFullScreen
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      height: "100%",
-                    }}
-                  />
-                </div>
+          )}
+
+          <YouTubeInput onSubmit={handleYouTube} disabled={processing || isProcessingYouTube} />
+                 <PlayerSection
+                file={file}
+                youtubeUrl={youtubeUrl}
+                transposedSrc={transposedSrc}
+                playing={playing}
+                setPlaying={setPlaying}
+                processing={processing}
+                isProcessingYouTube={isProcessingYouTube}
+                seekTo={seekTo}
+                semitones={semitones}
+                appliedSemitones={appliedSemitones}
+                isAudio={isAudio}
+                isVideo={isVideo}
+                AudioPlayer={AudioPlayer}
+                VideoPlayer={VideoPlayer}
+                processedItems={processedItems}
+              />
+
+{youtubeUrl && (
                 <div
                   style={{
                     textAlign: "center",
-                    color: "#aaa",
-                    fontSize: 12,
-                    marginTop: 4,
+                    marginBottom: 8,
+                    fontSize: 13,
+                    color: "#cbd5e0",
                   }}
                 >
-                  Original YouTube video (before transposition)
+                  <span style={{ marginRight: 12 }}>
+                    Original key: <span style={{ color: "#90cdf4" }}>{originalKeyLabel}</span>
+                  </span>
+                  <span>
+                    Current key: <span style={{ color: "#9ae6b4" }}>{currentKeyLabel}</span>
+                  </span>
                 </div>
+              )}
+
+                  <YouTubeKeyAnalysis
+                youtubeUrl={youtubeUrl}
+                isAnalyzingKey={isAnalyzingKey}
+                isProcessingYouTube={isProcessingYouTube}
+                handleAnalyzeKey={handleAnalyzeKey}
+                keyFeedback={keyFeedback}
+                keyAnalyzeDots={keyAnalyzeDots}
+                youtubeKey={youtubeKey}
+              >
+                <KeySelector
+                  youtubeKey={youtubeKey}
+                  appliedSemitones={appliedSemitones}
+                  processing={processing}
+                  isProcessingYouTube={isProcessingYouTube}
+                  handleTranspose={handleTranspose}
+                  CHROMATIC_NOTES={CHROMATIC_NOTES}
+                  CHROMATIC_NOTES_FLAT={CHROMATIC_NOTES_FLAT}
+                  NOTE_TO_INDEX={NOTE_TO_INDEX}
+                  processedItems={processedItems}
+                  youtubeUrl={youtubeUrl}
+                />
+              </YouTubeKeyAnalysis>
+
+              {(file || youtubeUrl) && (
+                <TransposeControls
+                  value={semitones}
+                  min={-12}
+                  max={12}
+                  onChange={handleTranspose}
+                  onReset={handleResetTranspose}
+                  disabled={processing || isProcessingYouTube}
+                />
+              )}
+          <Notice notice={notice} />
+          <ErrorDisplay error={appError || fileError || transError} />
+          {(file || youtubeUrl) && (
+            <>
+              
+              
+            
+              
+              <div style={{ textAlign: "center", marginBottom: 8 }}>
+                <label style={{ color: "#fff", marginRight: 8 }}>
+                  <input
+                    type='checkbox'
+                    checked={useWasm}
+                    onChange={(e) => setUseWasm(e.target.checked)}
+                    disabled={processing}
+                    style={{ marginRight: 4 }}
+                  />
+                  Use in-browser (WASM) transposition
+                </label>
               </div>
-            )}
-            {file && isAudio(file) && (
-              <AudioPlayer
-                src={transposedSrc}
-                playing={playing}
-                onPlay={() => setPlaying(true)}
-                onPause={() => setPlaying(false)}
-                disabled={processing || isProcessingYouTube}
-                seekTo={seekTo}
-                label={
-                  semitones !== 0
-                    ? `Transposed: ${semitones > 0 ? "+" : ""}${semitones} semitone${Math.abs(semitones) === 1 ? "" : "s"}`
-                    : "Original playback"
-                }
+              
+             
+        
+              {youtubeUrl && (
+                <div
+                  style={{
+                    textAlign: "center",
+                    fontSize: 12,
+                    color: "#a0aec0",
+                    marginTop: 2,
+                    marginBottom: 8,
+                  }}
+                >
+                  {isProcessingYouTube
+                    ? "Fetching YouTube audio and applying pitch shift. This can take 10-60 seconds."
+                    : "Tip: use +/- for quick transpose previews; latest request is applied."}
+                </div>
+              )}
+              <YouTubePlayer url={youtubeUrl} show={showOriginalYouTube} />
+       
+              <DownloadShare
+                onDownload={handleDownload}
+                onShare={handleShare}
+                disabled={!transposedSrc}
+                formats={OUTPUT_FORMATS}
+                selectedFormat={outputFormat}
+                onFormatChange={setOutputFormat}
               />
-            )}
-            {file && isVideo(file) && (
-              <VideoPlayer
-                src={transposedSrc}
-                playing={playing}
-                onPlay={() => setPlaying(true)}
-                onPause={() => setPlaying(false)}
-                disabled={processing || isProcessingYouTube}
-                seekTo={seekTo}
-                label={
-                  semitones !== 0
-                    ? `Transposed: ${semitones > 0 ? "+" : ""}${semitones} semitone${Math.abs(semitones) === 1 ? "" : "s"}`
-                    : "Original playback"
-                }
-              />
-            )}
-            {/* Show transposed audio player for YouTube audio result */}
-            {youtubeUrl && transposedSrc && (
-              <AudioPlayer
-                src={transposedSrc}
-                playing={playing}
-                onPlay={() => setPlaying(true)}
-                onPause={() => setPlaying(false)}
-                disabled={processing || isProcessingYouTube}
-                seekTo={seekTo}
-                label={`Transposed playback: ${semitones > 0 ? "+" : ""}${semitones} semitone${Math.abs(semitones) === 1 ? "" : "s"}`}
-              />
-            )}
-            <DownloadShare
-              onDownload={handleDownload}
-              onShare={handleShare}
-              disabled={!transposedSrc}
-              formats={OUTPUT_FORMATS}
-              selectedFormat={outputFormat}
-              onFormatChange={setOutputFormat}
-            />
-          </>
-        )}
-        <FAQ />
-      </div>
+            </>
+          )}
+           <FileUpload onFileSelect={handleFileSelect} disabled={processing || isProcessingYouTube} />
+          <FAQ />
+        </div>
       </main>
     </div>
   );

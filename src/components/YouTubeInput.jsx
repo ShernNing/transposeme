@@ -5,7 +5,11 @@ const YouTubeInput = ({ onSubmit, disabled }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (url) onSubmit(url);
+    if (url) {
+      onSubmit(url);
+      setTimeout(() => onSubmit(url), 0);
+      setUrl(""); // Clear input after successful load
+    }
   };
 
   return (

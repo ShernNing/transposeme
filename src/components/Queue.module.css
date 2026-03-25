@@ -1,0 +1,46 @@
+.queueContainer {
+  margin: 1rem 0;
+  padding: 1rem;
+  background: #f8f8f8;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+.queueList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.queueList li {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #eee;
+  cursor: pointer;
+}
+.queueList li:last-child {
+  border-bottom: none;
+}
+.active {
+  background: #e0f7fa;
+  font-weight: bold;
+}
+.title {
+  flex: 1;
+  margin-right: 1rem;
+}
+button {
+  margin-left: 0.25rem;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+button:hover {
+  background: #f0f0f0;
+}
+.empty {
+  color: #888;
+  font-style: italic;
+}
