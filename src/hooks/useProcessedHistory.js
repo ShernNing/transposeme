@@ -39,8 +39,9 @@ export default function useProcessedHistory() {
       try {
         const dbItems = await getAllProcessedItems();
         if (mounted && dbItems?.length > 0) {
-          setProcessedItems(dbItems);
-          localStorage.setItem("transpose_processedItems", JSON.stringify(dbItems));
+          const normalized = dbItems.map((i) => ({ ...i, semitones: Number(i.semitones ?? 0) }));
+          setProcessedItems(normalized);
+          localStorage.setItem("transpose_processedItems", JSON.stringify(normalized));
           return;
         }
       } catch {
@@ -49,7 +50,10 @@ export default function useProcessedHistory() {
       if (!mounted) return;
       try {
         const saved = localStorage.getItem("transpose_processedItems");
-        if (saved) setProcessedItems(JSON.parse(saved));
+        if (saved) {
+          const items = JSON.parse(saved);
+          setProcessedItems(items.map((i) => ({ ...i, semitones: Number(i.semitones ?? 0) })));
+        }
       } catch {
         // ignore
       }
@@ -58,7 +62,7 @@ export default function useProcessedHistory() {
   }, []);
 
   const addProcessedItem = useCallback((item) => {
-    const serializableItem = toSerializable(item);
+    const serializableItem = toSerializable({ ...item, semitones: Number(item.semitones ?? 0) });
     saveProcessedItem(serializableItem)
       .then(() => getAllProcessedItems())
       .then((dbItems) => {

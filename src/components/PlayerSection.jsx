@@ -25,6 +25,7 @@ function PlayerSection({
   controlsDisabled = false,
   youtubeKey,
   transposeDetectedKey,
+  mediaRef,
   ...audioVideoProps
 }) {
   const { isAudio, isVideo } = audioVideoProps;
@@ -38,11 +39,11 @@ function PlayerSection({
   let processedItem = null;
   if (file) {
     processedItem = processedItems.find(
-      (item) => item.fileName === file.name && item.semitones === semitones
+      (item) => item.fileName === file.name && Number(item.semitones) === Number(semitones)
     );
   } else if (youtubeUrl) {
     processedItem = processedItems.find(
-      (item) => item.youtubeUrl === youtubeUrl && item.semitones === semitones
+      (item) => item.youtubeUrl === youtubeUrl && Number(item.semitones) === Number(semitones)
     );
   }
   const title = processedItem?.title || processedItem?.fileName || processedItem?.label || '';
@@ -98,6 +99,7 @@ function PlayerSection({
         <>
           {ABToggle}
           <audioVideoProps.AudioPlayer
+            ref={mediaRef}
             src={activeSrc}
             playing={playing}
             onPlay={() => setPlaying(true)}
@@ -112,6 +114,7 @@ function PlayerSection({
         <>
           {ABToggle}
           <audioVideoProps.VideoPlayer
+            ref={mediaRef}
             src={activeSrc}
             playing={playing}
             onPlay={() => setPlaying(true)}
@@ -126,6 +129,7 @@ function PlayerSection({
         <>
           {ABToggle}
           <audioVideoProps.AudioPlayer
+            ref={mediaRef}
             src={activeSrc}
             playing={playing}
             onPlay={() => setPlaying(true)}

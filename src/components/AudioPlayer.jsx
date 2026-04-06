@@ -1,10 +1,13 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle } from "react";
 import styles from "./AudioPlayer.module.css";
 import { CONFIG } from "../utils/config";
 
-const AudioPlayer = ({ src, playing, onPlay, onPause, disabled, seekTo, label }) => {
+const AudioPlayer = forwardRef(function AudioPlayer({ src, playing, onPlay, onPause, disabled, seekTo, label }, ref) {
   const audioRef = useRef();
   const [playbackRate, setPlaybackRate] = useState(1);
+
+  // Expose the underlying <audio> element via ref
+  useImperativeHandle(ref, () => audioRef.current, []);
 
   useEffect(() => {
     if (audioRef.current && seekTo != null) {
@@ -55,6 +58,6 @@ const AudioPlayer = ({ src, playing, onPlay, onPause, disabled, seekTo, label })
       </div>
     </div>
   );
-};
+});
 
 export default AudioPlayer;

@@ -1,5 +1,5 @@
 // ProcessedHistory.jsx
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import { clearAllProcessedItems, saveProcessedItem } from "../utils/db";
 
 function formatDuration(seconds) {
@@ -16,6 +16,43 @@ export default function ProcessedHistory({ processedItems, onLoad, onDelete, onC
   const [typeFilter, setTypeFilter] = useState("all");
   const [hoveredId, setHoveredId] = useState(null);
   const [lastDeleted, setLastDeleted] = useState(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const importRef = useRef();
+
+  const handleExport = () => {
+    // Export metadata only — blobs are not JSON-serializable
+    const exportable = processedItems.map(({ blob, ...rest }) => rest);
+    const json = JSON.stringify(exportable, null, 2);
+    const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "transposeme-history.json";
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const items = JSON.parse(text);
+      if (!Array.isArray(items)) throw new Error("Expected an array");
+      for (const item of items) {
+        if (item.id) {
+          // Normalize semitones
+          item.semitones = Number(item.semitones ?? 0);
+          await saveProcessedItem(item);
+        }
+      }
+      if (onRefresh) await onRefresh();
+    } catch (err) {
+      alert("Import failed: " + err.message);
+    }
+    // Reset input so the same file can be re-imported
+    e.target.value = "";
+  };
 
   const handleDelete = (item) => {
     setLastDeleted(item);
@@ -61,8 +98,17 @@ export default function ProcessedHistory({ processedItems, onLoad, onDelete, onC
   return (
     <div style={{ margin: "12px 0 18px", padding: 0, background: "#23272f", borderRadius: 12, boxShadow: "0 2px 12px #0002", border: "1px solid #23272f", minHeight: 80 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "#a0aec0", fontSize: 14, fontWeight: 600, padding: "16px 20px 8px 20px" }}>
-        <span>Processed History</span>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button
+          onClick={() => setCollapsed((v) => !v)}
+          style={{ background: "none", border: "none", cursor: "pointer", color: "#a0aec0", fontSize: 14, fontWeight: 600, padding: 0, display: "flex", alignItems: "center", gap: 6 }}
+          aria-expanded={!collapsed}
+          title={collapsed ? "Expand history" : "Collapse history"}
+        >
+          <span style={{ fontSize: 10, display: "inline-block", transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>▼</span>
+          Processed History
+          <span style={{ color: "#4a5568", fontSize: 12, fontWeight: 400 }}>({filteredItems.length})</span>
+        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {lastDeleted && (
             <button
               onClick={handleUndo}
@@ -71,6 +117,21 @@ export default function ProcessedHistory({ processedItems, onLoad, onDelete, onC
               Undo Delete
             </button>
           )}
+          <button
+            style={{ padding: "6px 16px", borderRadius: 6, border: "1px solid #38405a", background: "#38405a", color: "#e2e8f0", fontSize: 14, fontWeight: 500, cursor: "pointer" }}
+            onClick={handleExport}
+            title="Export history metadata to JSON"
+          >
+            Export
+          </button>
+          <button
+            style={{ padding: "6px 16px", borderRadius: 6, border: "1px solid #38405a", background: "#38405a", color: "#e2e8f0", fontSize: 14, fontWeight: 500, cursor: "pointer" }}
+            onClick={() => importRef.current?.click()}
+            title="Import history from a previously exported JSON file"
+          >
+            Import
+          </button>
+          <input ref={importRef} type="file" accept="application/json" style={{ display: "none" }} onChange={handleImport} />
           <button
             style={{ padding: "6px 16px", borderRadius: 6, border: "1px solid #38405a", background: "#38405a", color: "#e2e8f0", fontSize: 14, fontWeight: 500, cursor: "pointer" }}
             onClick={handleClear}
@@ -85,6 +146,7 @@ export default function ProcessedHistory({ processedItems, onLoad, onDelete, onC
           </button>
         </div>
       </div>
+      {!collapsed && <>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '0 20px 8px 20px', marginBottom: 2 }}>
         <input
           type="text"
@@ -151,6 +213,7 @@ export default function ProcessedHistory({ processedItems, onLoad, onDelete, onC
           </div>
         ))}
       </div>
+      </>}
     </div>
   );
 }

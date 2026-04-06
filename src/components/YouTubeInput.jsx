@@ -7,10 +7,31 @@ const YOUTUBE_DOMAINS = [
   'm.youtube.com',
 ];
 
+// Standard YouTube video ID: 11 chars of [A-Za-z0-9_-]
+const VIDEO_ID_RE = /[A-Za-z0-9_-]{11}/;
+
+function extractVideoId(parsed) {
+  // youtu.be/<id>
+  if (parsed.hostname === 'youtu.be') {
+    return parsed.pathname.slice(1).split('/')[0] || null;
+  }
+  // ?v=<id> or /shorts/<id> or /live/<id> or /embed/<id>
+  const vParam = parsed.searchParams.get('v');
+  if (vParam) return vParam;
+  const parts = parsed.pathname.split('/');
+  const idx = parts.findIndex((p) => ['shorts', 'live', 'embed'].includes(p));
+  if (idx !== -1) return parts[idx + 1] || null;
+  return null;
+}
+
 function isValidYouTubeUrl(url) {
   try {
     const parsed = new URL(url);
-    return YOUTUBE_DOMAINS.some((d) => parsed.hostname === d || parsed.hostname.endsWith('.' + d));
+    if (!YOUTUBE_DOMAINS.some((d) => parsed.hostname === d || parsed.hostname.endsWith('.' + d))) {
+      return false;
+    }
+    const id = extractVideoId(parsed);
+    return id != null && VIDEO_ID_RE.test(id);
   } catch {
     return false;
   }

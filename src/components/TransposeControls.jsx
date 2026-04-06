@@ -32,6 +32,7 @@ const TransposeControls = ({ value, min, max, onChange, onReset, disabled, tempo
 
     <label style={{ color: '#fff', marginRight: 12 }}>
       {tempoMode ? 'Tempo change (semitone steps):' : 'Transpose (semitones):'}
+      <span style={{ color: '#718096', fontSize: 11, marginLeft: 6 }}>← → keys</span>
     </label>
     <button onClick={() => onChange(value - 1)} disabled={disabled || value <= min}>-</button>
     <input

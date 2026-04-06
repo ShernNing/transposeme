@@ -14,9 +14,18 @@ const YT_TIMEOUT_MS = 120_000;
 const RUBBERBAND_TIMEOUT_MS = 120_000;
 const PYTHON_TIMEOUT_MS = 60_000;
 const MAX_VIDEO_DURATION_SECONDS = 1200;
+const TRANSPOSE_CACHE_MAX = 50;
+const KEY_CACHE_MAX = 100;
+const requestHits = new Map();
+
+// LRU-evicting Map wrappers
 const transposeCache = new Map();
 const keyCache = new Map();
-const requestHits = new Map();
+
+function cacheSet(map, key, value, maxSize) {
+  if (map.size >= maxSize) map.delete(map.keys().next().value);
+  map.set(key, value);
+}
 
 const app = express();
 app.use(cors());
@@ -188,7 +197,7 @@ app.post("/api/youtube-key", async (req, res) => {
     });
   }
   safeUnlink(audioPath);
-  keyCache.set(url, keyResult);
+  cacheSet(keyCache, url, keyResult, KEY_CACHE_MAX);
   res.json({ key: keyResult, cached: false });
 });
 // (removed duplicate imports and app initialization)
@@ -305,8 +314,13 @@ app.post("/api/youtube-transpose", async (req, res) => {
     });
   }
 
-  // Send file
-  transposeCache.set(cacheKey, outPath);
+  // Send file — evict oldest cached file from disk when cache is full
+  if (transposeCache.size >= TRANSPOSE_CACHE_MAX) {
+    const oldestKey = transposeCache.keys().next().value;
+    safeUnlink(transposeCache.get(oldestKey));
+    transposeCache.delete(oldestKey);
+  }
+  cacheSet(transposeCache, cacheKey, outPath, TRANSPOSE_CACHE_MAX);
   res.download(outPath, "transposed.wav", (err) => {
     safeUnlink(audioPath);
     if (err) safeUnlink(outPath);
@@ -323,6 +337,7 @@ app.post("/api/fetch-url", async (req, res) => {
     return res.status(400).json({ error: "Missing or invalid url" });
   }
   // Only allow fetching from known chord sheet domains
+  // Only exact domain or *.domain matches — prevents evil.ultimate-guitar.com bypass
   const ALLOWED_DOMAINS = [
     "ultimate-guitar.com",
     "tabs.ultimate-guitar.com",
@@ -335,7 +350,8 @@ app.post("/api/fetch-url", async (req, res) => {
   } catch {
     return res.status(400).json({ error: "Invalid URL" });
   }
-  const allowed = ALLOWED_DOMAINS.some((d) => parsedUrl.hostname.endsWith(d));
+  const h = parsedUrl.hostname;
+  const allowed = ALLOWED_DOMAINS.some((d) => h === d || h.endsWith("." + d));
   if (!allowed) {
     return res.status(403).json({ error: "Domain not allowed" });
   }
@@ -354,8 +370,27 @@ app.post("/api/fetch-url", async (req, res) => {
   }
 });
 
+// Sweep orphaned temp files left by a previous server crash
+function sweepTempDir() {
+  const tempDir = path.join(__dirname, "tmp");
+  if (!fs.existsSync(tempDir)) return;
+  const files = fs.readdirSync(tempDir);
+  let removed = 0;
+  for (const f of files) {
+    // Only remove wav files not currently tracked in the transpose cache
+    const fullPath = path.join(tempDir, f);
+    const isTracked = [...transposeCache.values()].includes(fullPath);
+    if (!isTracked && f.endsWith(".wav")) {
+      safeUnlink(fullPath);
+      removed++;
+    }
+  }
+  if (removed > 0) console.log(`Startup: swept ${removed} orphaned temp file(s) from ${tempDir}`);
+}
+
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, async () => {
+  sweepTempDir();
   console.log(`Server running on port ${PORT}`);
   const deps = await getDependencyStatus();
   if (!deps.ytDlpOk) {

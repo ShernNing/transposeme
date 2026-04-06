@@ -65,11 +65,14 @@ function App() {
   const [keyAnalyzeDots, setKeyAnalyzeDots] = useState(".");
   const [notice, setNotice] = useState(null);
   const [tempoMode, setTempoMode] = useState(false);
+  const [fileReadStatus, setFileReadStatus] = useState(""); // "Reading file..." etc.
 
   // --- Hooks ---
   const { file, setFile, error: fileError } = useFileHandler();
   const { transpose, processing, error: transError } = useTransposer();
   const { getAudioContext, audioCtxRef } = useAudioContext();
+  const playerRef = useRef(null); // points to the active <audio> or <video> DOM element
+  const fileBufferRef = useRef({ file: null, buffer: null }); // cached ArrayBuffer for current file
   const {
     processedItems,
     addProcessedItem,
@@ -88,6 +91,21 @@ function App() {
   }, []);
 
   const showNotice = useCallback((type, message) => setNotice({ type, message }), []);
+
+  // Read a File as ArrayBuffer — caches result per file object, shows status for large files
+  const readFileArrayBuffer = useCallback(async (f) => {
+    if (fileBufferRef.current.file === f && fileBufferRef.current.buffer) {
+      return fileBufferRef.current.buffer;
+    }
+    if (f.size > 10 * 1024 * 1024) setFileReadStatus("Reading file…");
+    try {
+      const buf = await f.arrayBuffer();
+      fileBufferRef.current = { file: f, buffer: buf };
+      return buf;
+    } finally {
+      setFileReadStatus("");
+    }
+  }, []);
 
   const formatSemitoneLabel = (value) => {
     const prefix = value > 0 ? `+${value}` : `${value}`;
@@ -170,6 +188,7 @@ function App() {
   // --- Handler: File upload ---
   const handleFileSelect = async (f) => {
     setAppError("");
+    fileBufferRef.current = { file: null, buffer: null }; // invalidate cache on new file
     setFile(f);
     setYoutubeUrl("");
     setShowOriginalYouTube(true);
@@ -182,7 +201,7 @@ function App() {
     if (!f) return;
     try {
       if (useWasm && isAudio(f)) {
-        const audioBuffer = await (await getAudioContext()).decodeAudioData(await f.arrayBuffer());
+        const audioBuffer = await (await getAudioContext()).decodeAudioData(await readFileArrayBuffer(f));
         const transposedBuffer = await transposeAudioBuffer(audioBuffer, 0);
         const wavBlob = await audioBufferToWavBlob(transposedBuffer);
         setTransposedFromBlob(wavBlob);
@@ -194,7 +213,7 @@ function App() {
       } else if (useWasm && isVideo(f)) {
         let audioBuffer;
         try {
-          audioBuffer = await (await getAudioContext()).decodeAudioData(await f.arrayBuffer());
+          audioBuffer = await (await getAudioContext()).decodeAudioData(await readFileArrayBuffer(f));
         } catch (e) {
           setAppError("Failed to decode audio from video file. " + (e.message || ""));
           return;
@@ -230,11 +249,7 @@ function App() {
   // --- Handler: Real-time transposition ---
   const runTranspose = useCallback(async (newSemitones) => {
     setAppError("");
-    let currentTime = 0;
-    const audio = document.querySelector("audio");
-    const video = document.querySelector("video");
-    if (audio && !audio.paused) currentTime = audio.currentTime;
-    if (video && !video.paused) currentTime = video.currentTime;
+    const currentTime = playerRef.current?.currentTime ?? 0;
 
     if (youtubeUrl) {
       await runYouTubeTranspose(newSemitones, { currentTime, setSeekTo });
@@ -243,7 +258,7 @@ function App() {
     if (!file) { setAppError("Choose a file or YouTube link first."); return; }
     try {
       if (useWasm && isAudio(file)) {
-        const audioBuffer = await (await getAudioContext()).decodeAudioData(await file.arrayBuffer());
+        const audioBuffer = await (await getAudioContext()).decodeAudioData(await readFileArrayBuffer(file));
         const transposedBuffer = await transposeAudioBuffer(
           audioBuffer,
           tempoMode ? 0 : newSemitones,
@@ -257,7 +272,7 @@ function App() {
         setSeekTo(currentTime);
         setPlaying(true);
       } else if (useWasm && isVideo(file)) {
-        const audioBuffer = await (await getAudioContext()).decodeAudioData(await file.arrayBuffer());
+        const audioBuffer = await (await getAudioContext()).decodeAudioData(await readFileArrayBuffer(file));
         const transposedBuffer = await transposeAudioBuffer(
           audioBuffer,
           tempoMode ? 0 : newSemitones,
@@ -302,6 +317,26 @@ function App() {
   }, [appliedSemitones, youtubeUrl, isProcessingYouTube, debounceRef, runTranspose]);
 
   const handleResetTranspose = useCallback(() => handleTranspose(0), [handleTranspose]);
+
+  // --- Arrow key shortcut: ← / → step semitones when not typing in an input ---
+  useEffect(() => {
+    if (!file && !youtubeUrl) return;
+    const onKeyDown = (e) => {
+      if (processing || isProcessingYouTube) return;
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return;
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        const next = Math.max(CONFIG.SEMITONE_MIN, semitones - 1);
+        if (next !== semitones) handleTranspose(next);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        const next = Math.min(CONFIG.SEMITONE_MAX, semitones + 1);
+        if (next !== semitones) handleTranspose(next);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [file, youtubeUrl, semitones, processing, isProcessingYouTube, handleTranspose]);
 
   // --- Handler: Load from history ---
   const handleLoadProcessed = (item) => {
@@ -411,6 +446,7 @@ function App() {
             controlsDisabled={processing || isProcessingYouTube}
             youtubeKey={youtubeKey}
             transposeDetectedKey={transposeDetectedKey}
+            mediaRef={playerRef}
           />
 
           {youtubeUrl && (
@@ -462,6 +498,11 @@ function App() {
           )}
 
           <Notice notice={notice} />
+          {fileReadStatus && (
+            <div style={{ textAlign: "center", color: "#f6e05e", fontSize: 13, marginBottom: 6 }}>
+              {fileReadStatus}
+            </div>
+          )}
           <ErrorDisplay error={appError || fileError || transError} />
 
           {appError && youtubeUrl && !isProcessingYouTube && (

@@ -1,10 +1,13 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle } from "react";
 import styles from "./VideoPlayer.module.css";
 import { CONFIG } from "../utils/config";
 
-const VideoPlayer = ({ src, playing, onPlay, onPause, disabled, seekTo, label }) => {
+const VideoPlayer = forwardRef(function VideoPlayer({ src, playing, onPlay, onPause, disabled, seekTo, label }, ref) {
   const videoRef = useRef();
   const [playbackRate, setPlaybackRate] = useState(1);
+
+  // Expose the underlying <video> element via ref
+  useImperativeHandle(ref, () => videoRef.current, []);
 
   useEffect(() => {
     if (videoRef.current && seekTo != null) {
@@ -55,6 +58,6 @@ const VideoPlayer = ({ src, playing, onPlay, onPause, disabled, seekTo, label })
       </div>
     </div>
   );
-};
+});
 
 export default VideoPlayer;
