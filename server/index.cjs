@@ -6,11 +6,13 @@ const { v4: uuidv4 } = require("uuid");
 const path = require("path");
 const { promisify } = require("util");
 const execFileAsync = promisify(execFile);
-const REQUEST_WINDOW_MS = 60 * 1000;
+
+// Config — keep in sync with src/utils/config.js
+const REQUEST_WINDOW_MS = 60_000;
 const MAX_REQUESTS_PER_WINDOW = 20;
-const YT_TIMEOUT_MS = 120000;
-const RUBBERBAND_TIMEOUT_MS = 120000;
-const PYTHON_TIMEOUT_MS = 60000;
+const YT_TIMEOUT_MS = 120_000;
+const RUBBERBAND_TIMEOUT_MS = 120_000;
+const PYTHON_TIMEOUT_MS = 60_000;
 const MAX_VIDEO_DURATION_SECONDS = 1200;
 const transposeCache = new Map();
 const keyCache = new Map();
@@ -309,6 +311,47 @@ app.post("/api/youtube-transpose", async (req, res) => {
     safeUnlink(audioPath);
     if (err) safeUnlink(outPath);
   });
+});
+
+// POST /api/fetch-url
+// Proxy for fetching external URLs (chord sheets) — avoids CORS issues in browser
+// { url: string }
+app.post("/api/fetch-url", async (req, res) => {
+  if (!enforceRateLimit(req, res)) return;
+  const { url } = req.body;
+  if (!url || typeof url !== "string") {
+    return res.status(400).json({ error: "Missing or invalid url" });
+  }
+  // Only allow fetching from known chord sheet domains
+  const ALLOWED_DOMAINS = [
+    "ultimate-guitar.com",
+    "tabs.ultimate-guitar.com",
+    "worshiptogether.com",
+    "pnwchords.com",
+  ];
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    return res.status(400).json({ error: "Invalid URL" });
+  }
+  const allowed = ALLOWED_DOMAINS.some((d) => parsedUrl.hostname.endsWith(d));
+  if (!allowed) {
+    return res.status(403).json({ error: "Domain not allowed" });
+  }
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; TransposeMe/1.0)",
+        "Accept": "text/html,application/xhtml+xml",
+      },
+      redirect: "follow",
+    });
+    const text = await response.text();
+    res.status(response.status).send(text);
+  } catch (e) {
+    res.status(502).json({ error: "Failed to fetch URL", details: e.message });
+  }
 });
 
 const PORT = process.env.PORT || 4000;

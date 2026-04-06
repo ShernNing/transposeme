@@ -1,9 +1,19 @@
-import React from "react";
+import React, { useState, memo } from "react";
 
-export default function PlayerSection({
+function formatDuration(seconds) {
+  if (!isFinite(seconds)) return '';
+  const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+  const m = Math.floor((seconds / 60) % 60).toString();
+  const h = Math.floor(seconds / 3600);
+  if (h > 0) return `${h}:${m.padStart(2, '0')}:${s}`;
+  return `${m}:${s}`;
+}
+
+function PlayerSection({
   file,
   youtubeUrl,
   transposedSrc,
+  originalSrc,
   playing,
   setPlaying,
   processing,
@@ -13,11 +23,16 @@ export default function PlayerSection({
   appliedSemitones,
   processedItems = [],
   controlsDisabled = false,
-  youtubeKey, // pass from App if available
-  transposeDetectedKey, // pass from App
+  youtubeKey,
+  transposeDetectedKey,
   ...audioVideoProps
 }) {
   const { isAudio, isVideo } = audioVideoProps;
+  const [showOriginal, setShowOriginal] = useState(false);
+
+  // Only show A/B toggle when we have both original and transposed and semitones ≠ 0
+  const canAB = originalSrc && transposedSrc && semitones !== 0;
+  const activeSrc = canAB && showOriginal ? originalSrc : transposedSrc;
 
   // Find metadata for current file/youtubeUrl
   let processedItem = null;
@@ -32,21 +47,10 @@ export default function PlayerSection({
   }
   const title = processedItem?.title || processedItem?.fileName || processedItem?.label || '';
   const meta = processedItem?.metadata;
-  // Determine the original key (from metadata or youtubeKey)
   const originalKey = meta?.key || youtubeKey || "";
-  // Compute the current key after transposition
   const currentKey = originalKey && typeof transposeDetectedKey === 'function'
     ? transposeDetectedKey(originalKey, semitones)
     : "";
-
-  function formatDuration(seconds) {
-    if (!isFinite(seconds)) return '';
-    const s = Math.floor(seconds % 60).toString().padStart(2, '0');
-    const m = Math.floor((seconds / 60) % 60).toString();
-    const h = Math.floor(seconds / 3600);
-    if (h > 0) return `${h}:${m.padStart(2, '0')}:${s}`;
-    return `${m}:${s}`;
-  }
 
   const metaString = meta
     ? [
@@ -54,80 +58,86 @@ export default function PlayerSection({
         meta.sampleRate ? `${meta.sampleRate}Hz` : null,
         meta.channels ? `${meta.channels}ch` : null,
         meta.width && meta.height ? `${meta.width}x${meta.height}px` : null,
-      ]
-        .filter(Boolean)
-        .join(' • ')
+      ].filter(Boolean).join(' • ')
     : '';
 
   function labelWithKey(base, key) {
     return key ? `${base}  |  Key: ${key}` : base;
   }
-  let audioLabel = '';
-  if (file && isAudio(file)) {
-    audioLabel = labelWithKey(
-      (title ? `${title}  |  ` : '') +
-      (semitones !== 0
-        ? `Transposed: ${semitones > 0 ? "+" : ""}${semitones} semitone${Math.abs(semitones) === 1 ? "" : "s"}`
-        : "Original playback") + (metaString ? `  |  ${metaString}` : ""),
-      currentKey
-    );
-  }
-  let videoLabel = '';
-  if (file && isVideo(file)) {
-    videoLabel = labelWithKey(
-      (title ? `${title}  |  ` : '') +
-      (semitones !== 0
-        ? `Transposed: ${semitones > 0 ? "+" : ""}${semitones} semitone${Math.abs(semitones) === 1 ? "" : "s"}`
-        : "Original playback") + (metaString ? `  |  ${metaString}` : ""),
-      currentKey
-    );
-  }
-  let ytLabel = '';
-  if (youtubeUrl && transposedSrc) {
-    ytLabel = labelWithKey(
-      (title ? `${title}  |  ` : '') +
-      `Transposed playback: ${semitones > 0 ? "+" : ""}${semitones} semitone${Math.abs(semitones) === 1 ? "" : "s"}` +
-      (metaString ? `  |  ${metaString}` : ""),
-      currentKey
-    );
-  }
+
+  const semLabel = semitones !== 0
+    ? `Transposed: ${semitones > 0 ? "+" : ""}${semitones} semitone${Math.abs(semitones) === 1 ? "" : "s"}`
+    : "Original playback";
+
+  const baseLabel = (title ? `${title}  |  ` : '') + semLabel + (metaString ? `  |  ${metaString}` : '');
+
+  const ABToggle = canAB ? (
+    <div style={{ textAlign: "center", margin: "6px 0" }}>
+      <button
+        onClick={() => setShowOriginal((v) => !v)}
+        style={{
+          background: showOriginal ? "#2b4360" : "#22543d",
+          color: showOriginal ? "#90cdf4" : "#9ae6b4",
+          border: "none",
+          borderRadius: 6,
+          padding: "5px 16px",
+          fontWeight: 700,
+          fontSize: 13,
+          cursor: "pointer",
+        }}
+        title="Toggle between original and transposed audio"
+      >
+        {showOriginal ? "🔁 Hearing: Original — click for Transposed" : "🔁 Hearing: Transposed — click for Original"}
+      </button>
+    </div>
+  ) : null;
 
   return (
     <>
       {file && isAudio(file) && (
-        <audioVideoProps.AudioPlayer
-          src={transposedSrc}
-          playing={playing}
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
-          disabled={controlsDisabled}
-          seekTo={seekTo}
-          label={audioLabel}
-        />
+        <>
+          {ABToggle}
+          <audioVideoProps.AudioPlayer
+            src={activeSrc}
+            playing={playing}
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            disabled={controlsDisabled}
+            seekTo={seekTo}
+            label={labelWithKey(canAB && showOriginal ? (title ? `${title}  |  Original` : "Original") : baseLabel, canAB && showOriginal ? originalKey : currentKey)}
+          />
+        </>
       )}
       {file && isVideo(file) && (
-        <audioVideoProps.VideoPlayer
-          src={transposedSrc}
-          playing={playing}
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
-          disabled={controlsDisabled}
-          seekTo={seekTo}
-          label={videoLabel}
-        />
+        <>
+          {ABToggle}
+          <audioVideoProps.VideoPlayer
+            src={activeSrc}
+            playing={playing}
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            disabled={controlsDisabled}
+            seekTo={seekTo}
+            label={labelWithKey(canAB && showOriginal ? (title ? `${title}  |  Original` : "Original") : baseLabel, canAB && showOriginal ? originalKey : currentKey)}
+          />
+        </>
       )}
-      {/* Show transposed audio player for YouTube audio result */}
       {youtubeUrl && transposedSrc && (
-        <audioVideoProps.AudioPlayer
-          src={transposedSrc}
-          playing={playing}
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
-          disabled={controlsDisabled}
-          seekTo={seekTo}
-          label={ytLabel}
-        />
+        <>
+          {ABToggle}
+          <audioVideoProps.AudioPlayer
+            src={activeSrc}
+            playing={playing}
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            disabled={controlsDisabled}
+            seekTo={seekTo}
+            label={labelWithKey(canAB && showOriginal ? (title ? `${title}  |  Original` : "Original") : baseLabel, canAB && showOriginal ? originalKey : currentKey)}
+          />
+        </>
       )}
     </>
   );
 }
+
+export default memo(PlayerSection);
