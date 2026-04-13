@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: transposeme-server
+    runtime: docker
+    plan: free
+    dockerfilePath: Dockerfile.conda # Change to 'Dockerfile' if you rename your Dockerfile
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "4000"

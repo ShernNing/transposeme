@@ -42,3 +42,5 @@ node index.cjs
 
 - This server downloads and processes YouTube audio on demand, then deletes temp files.
 - For production, add error handling, rate limiting, and security as needed.
+- docker buildx build --platform linux/amd64 -f Dockerfile.conda -t transposeme-server .
+- docker run --rm -it -p 4000:4000 transposeme-server
