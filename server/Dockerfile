@@ -1,7 +1,6 @@
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 WORKDIR /app
-COPY . .
 
 # Install system dependencies
 RUN apt-get update && \
@@ -10,10 +9,8 @@ RUN apt-get update && \
 
 # Install Python dependencies (Essentia, yt-dlp)
 RUN pip install --upgrade pip && \
-    pip install essentia yt-dlp
-
-# Install Node.js (from NodeSource)
-
+    pip install essentia && \
+    pip install --upgrade yt-dlp
 
 # Install Node.js (from NodeSource)
 RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
@@ -21,13 +18,16 @@ RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
     ln -sf /usr/bin/node /usr/local/bin/node && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy cookies.txt if present (for yt-dlp authentication)
-COPY cookies.txt /app/cookies.txt
+# Copy package files and install Node.js dependencies first (layer caching)
+COPY package*.json ./
+RUN npm install --omit=dev
 
-# If you need to pass YouTube cookies to yt-dlp, mount or copy your cookies.txt and add --cookies /app/cookies.txt to yt-dlp args
+# Copy the rest of the application
+COPY . .
 
-# Install Node.js dependencies
-RUN npm install
+# cookies.txt is intentionally not copied here — it is gitignored and may contain
+# sensitive data. If you need YouTube authentication, upload cookies.txt as a
+# Render Secret File mounted at /app/cookies.txt (set COOKIES_PATH=/app/cookies.txt).
 
 EXPOSE 4000
 

@@ -3,8 +3,14 @@ services:
     name: transposeme-server
     runtime: docker
     plan: free
-    dockerfilePath: Dockerfile.conda # Change to 'Dockerfile' if you rename your Dockerfile
+    dockerfilePath: Dockerfile.conda
     autoDeploy: true
     envVars:
       - key: PORT
         value: "4000"
+      - key: NODE_ENV
+        value: production
+      - key: CORS_ORIGIN
+        value: https://your-app.vercel.app  # Replace with your actual Vercel URL
+      - key: COOKIES_PATH
+        value: /app/cookies.txt

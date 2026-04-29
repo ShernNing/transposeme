@@ -160,14 +160,14 @@ function enforceRateLimit(req, res) {
 
 async function downloadAudio(url, audioPath) {
   const ytDlpArgs = [
-    "--js-runtime", "node",
+    "--extractor-args", "youtube:player_client=android",
     "--proxy", "",
     "--match-filter", `duration <= ${MAX_VIDEO_DURATION_SECONDS}`,
     "-x", "--audio-format", "wav",
     "-o", audioPath,
   ];
   if (COOKIES_EXISTS) {
-    ytDlpArgs.splice(2, 0, "--cookies", COOKIES_PATH);
+    ytDlpArgs.unshift("--cookies", COOKIES_PATH);
   }
   ytDlpArgs.push(url);
 
