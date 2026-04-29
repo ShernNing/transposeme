@@ -3,13 +3,16 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "main.cjs",
   "scripts": {
     "dev": "vite",
     "dev:server": "node server/index.cjs",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:server\"",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron": "electron .",
+    "package": "electron-packager . transposeme --platform=darwin,win32,linux --arch=x64 --out=release-build --overwrite"
   },
   "concurrently": "^8.2.2",
   "engines": {
@@ -35,6 +38,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
     "concurrently": "^9.2.1",
+    "electron": "^41.3.0",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
