@@ -2,6 +2,14 @@ const { app, BrowserWindow } = require("electron");
 const path = require("path");
 const { spawn } = require("child_process");
 
+// Prevent multiple instances (important for packaged apps on macOS/Windows)
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  app.quit();
+  return;
+}
+
 let backendProcess;
 
 function createWindow() {
@@ -23,8 +31,12 @@ app.whenReady().then(() => {
   const isElectron = !!process.versions.electron;
   const isBackend = process.env.IS_BACKEND === "1";
 
-  if (!isBackend) {
-    // Start backend server using Node, not Electron
+  // Only the primary instance should start the backend
+  if (
+    !isBackend &&
+    app.isReady() &&
+    app.commandLine.hasSwitch("no-backend") === false
+  ) {
     const nodeBinary = process.env.NODE_BINARY || process.argv[0] || "node";
     backendProcess = spawn(
       nodeBinary,
@@ -46,6 +58,14 @@ app.whenReady().then(() => {
       console.log(`Backend process exited with code ${code}, signal ${signal}`);
     });
   }
+  // macOS: Focus window if user tries to open a second instance
+  app.on("second-instance", () => {
+    const wins = BrowserWindow.getAllWindows();
+    if (wins.length) {
+      if (wins[0].isMinimized()) wins[0].restore();
+      wins[0].focus();
+    }
+  });
 
   createWindow();
 
