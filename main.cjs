@@ -25,9 +25,17 @@ app.whenReady().then(() => {
     [path.join(__dirname, "server", "index.cjs")],
     {
       stdio: "inherit",
-      env: { ...process.env, PORT: "4000" }, // Set backend port if needed
+      env: { ...process.env, PORT: process.env.BACKEND_PORT || "4000" }, // Configurable backend port, default 4000
     },
   );
+
+  // Error handling for backend process
+  backendProcess.on("error", (err) => {
+    console.error("Failed to start backend process:", err);
+  });
+  backendProcess.on("exit", (code, signal) => {
+    console.log(`Backend process exited with code ${code}, signal ${signal}`);
+  });
 
   createWindow();
 
