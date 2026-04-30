@@ -33,6 +33,8 @@ This web app lets you upload or link to audio/video (including YouTube), transpo
 
 ## Running the App
 
+### Development (Web)
+
 Start the backend server:
 
 ```sh
@@ -50,6 +52,18 @@ Optional health check:
 ```sh
 curl http://localhost:4000/api/health
 ```
+
+### Desktop App (Electron)
+
+To run the Electron desktop app (which automatically starts the backend server):
+
+```sh
+npm run electron
+```
+
+Or, for a packaged build, see the `package` script in `package.json`.
+
+**Note:** When running with Electron, you do NOT need to start the backend server manually. The Electron main process will launch it for you.
 
 ## API
 

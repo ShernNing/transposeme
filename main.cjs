@@ -19,17 +19,17 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // Start backend server
+  // Start backend server using Node, not Electron
+  const nodeBinary = process.env.NODE_BINARY || process.argv[0] || "node";
   backendProcess = spawn(
-    process.execPath,
+    nodeBinary,
     [path.join(__dirname, "server", "index.cjs")],
     {
       stdio: "inherit",
-      env: { ...process.env, PORT: process.env.BACKEND_PORT || "4000" }, // Configurable backend port, default 4000
+      env: { ...process.env, PORT: process.env.BACKEND_PORT || "4000" },
     },
   );
 
-  // Error handling for backend process
   backendProcess.on("error", (err) => {
     console.error("Failed to start backend process:", err);
   });
