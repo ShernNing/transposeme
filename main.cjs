@@ -21,7 +21,7 @@ function createWindow() {
 app.whenReady().then(() => {
   // Start backend server
   backendProcess = spawn(
-    "node",
+    process.execPath,
     [path.join(__dirname, "server", "index.cjs")],
     {
       stdio: "inherit",
