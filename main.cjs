@@ -25,7 +25,7 @@ app.whenReady().then(() => {
     [path.join(__dirname, "server", "index.cjs")],
     {
       stdio: "inherit",
-      env: { ...process.env, PORT: "5001" }, // Set backend port if needed
+      env: { ...process.env, PORT: "4000" }, // Set backend port if needed
     },
   );
 
