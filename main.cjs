@@ -22,6 +22,13 @@ function createWindow() {
     },
   });
 
+  // Window event logging
+  win.on("focus", () => console.log("[Electron] Window focused"));
+  win.on("blur", () => console.log("[Electron] Window blurred"));
+  win.on("minimize", () => console.log("[Electron] Window minimized"));
+  win.on("restore", () => console.log("[Electron] Window restored"));
+  win.on("close", () => console.log("[Electron] Window closed"));
+
   // Load the React build output
   win.loadFile(path.join(__dirname, "dist", "index.html"));
 }
@@ -42,7 +49,7 @@ app.whenReady().then(() => {
       nodeBinary,
       [path.join(__dirname, "server", "index.cjs")],
       {
-        stdio: "inherit",
+        stdio: ["pipe", "pipe", "pipe"],
         env: {
           ...process.env,
           PORT: process.env.BACKEND_PORT || "4000",
@@ -51,6 +58,12 @@ app.whenReady().then(() => {
       },
     );
 
+    backendProcess.stdout.on("data", (data) => {
+      console.log(`[backend stdout]: ${data}`);
+    });
+    backendProcess.stderr.on("data", (data) => {
+      console.error(`[backend stderr]: ${data}`);
+    });
     backendProcess.on("error", (err) => {
       console.error("Failed to start backend process:", err);
     });

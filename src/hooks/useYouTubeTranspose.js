@@ -29,7 +29,9 @@ function evictCache(cacheMap, maxSize) {
 async function retry(fn, attempts = 3, delay = 500) {
   let lastErr;
   for (let i = 0; i < attempts; i++) {
-    try { return await fn(); } catch (err) {
+    try {
+      return await fn();
+    } catch (err) {
       lastErr = err;
       if (i < attempts - 1) await new Promise((res) => setTimeout(res, delay));
     }
@@ -40,7 +42,7 @@ async function retry(fn, attempts = 3, delay = 500) {
 async function fetchYouTubeTitle(url) {
   try {
     const resp = await fetch(
-      `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`,
     );
     if (!resp.ok) return null;
     const data = await resp.json();
@@ -91,28 +93,45 @@ export default function useYouTubeTranspose({
       if (abortRef.current) abortRef.current.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-      const response = await fetch(`${API_BASE_URL}/api/youtube-transpose`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, semitones }),
-        signal: controller.signal,
+      console.log("[API] POST", `${API_BASE_URL}/api/youtube-transpose`, {
+        url,
+        semitones,
       });
+      let response;
+      try {
+        response = await fetch(`${API_BASE_URL}/api/youtube-transpose`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url, semitones }),
+          signal: controller.signal,
+        });
+        console.log("[API] Response", response.status, response.statusText);
+      } catch (err) {
+        console.error("[API] Network error (youtube-transpose):", err);
+        throw err;
+      }
       if (!response.ok) {
         const errText = await response.text();
-        throw new Error(prettyApiError("Failed to process YouTube link.", errText));
+        console.error("[API] Error response (youtube-transpose):", errText);
+        throw new Error(
+          prettyApiError("Failed to process YouTube link.", errText),
+        );
       }
       const blob = await response.blob();
       evictCache(youtubeCacheRef.current, CONFIG.YOUTUBE_BLOB_CACHE_MAX);
       youtubeCacheRef.current.set(cacheKey, blob);
       return blob;
     },
-    [API_BASE_URL]
+    [API_BASE_URL],
   );
 
   const handleAnalyzeKey = useCallback(
     async (urlOverride) => {
       const url = urlOverride || youtubeUrl;
-      if (!url) { setAppError("Load a YouTube URL first."); return; }
+      if (!url) {
+        setAppError("Load a YouTube URL first.");
+        return;
+      }
       setAppError("");
       if (keyCacheRef.current.has(url)) {
         setYoutubeKey(keyCacheRef.current.get(url));
@@ -120,14 +139,25 @@ export default function useYouTubeTranspose({
       }
       setIsAnalyzingKey(true);
       try {
-        const response = await fetch(`${API_BASE_URL}/api/youtube-key`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url }),
-        });
+        console.log("[API] POST", `${API_BASE_URL}/api/youtube-key`, { url });
+        let response;
+        try {
+          response = await fetch(`${API_BASE_URL}/api/youtube-key`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
+          });
+          console.log("[API] Response", response.status, response.statusText);
+        } catch (err) {
+          console.error("[API] Network error (youtube-key):", err);
+          throw err;
+        }
         if (!response.ok) {
           const errText = await response.text();
-          throw new Error(prettyApiError("Failed to analyze song key.", errText));
+          console.error("[API] Error response (youtube-key):", errText);
+          throw new Error(
+            prettyApiError("Failed to analyze song key.", errText),
+          );
         }
         const data = await response.json();
         const detected = data?.key || "Unknown";
@@ -140,7 +170,7 @@ export default function useYouTubeTranspose({
         setIsAnalyzingKey(false);
       }
     },
-    [youtubeUrl, API_BASE_URL, setAppError]
+    [youtubeUrl, API_BASE_URL, setAppError],
   );
 
   const handleYouTube = useCallback(
@@ -188,17 +218,26 @@ export default function useYouTubeTranspose({
         } else {
           setIsAnalyzingKey(true);
           try {
+            console.log("[API] POST", `${API_BASE_URL}/api/youtube-key`, {
+              url,
+            });
             const keyResp = await fetch(`${API_BASE_URL}/api/youtube-key`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ url }),
             });
+            console.log("[API] Response", keyResp.status, keyResp.statusText);
             if (keyResp.ok) {
               const keyData = await keyResp.json();
               const detected = keyData?.key || "Unknown";
               keyCacheRef.current.set(url, detected);
               setYoutubeKey(detected);
+            } else {
+              const errText = await keyResp.text();
+              console.error("[API] Error response (youtube-key):", errText);
             }
+          } catch (err) {
+            console.error("[API] Network error (youtube-key):", err);
           } finally {
             setIsAnalyzingKey(false);
           }
@@ -206,18 +245,29 @@ export default function useYouTubeTranspose({
       } catch (e) {
         if (e.name === "AbortError") return;
         setTransposedFromBlob(null);
-        setAppError("YouTube processing failed: " + (e?.message || "Unknown error"));
+        setAppError(
+          "YouTube processing failed: " + (e?.message || "Unknown error"),
+        );
+        console.error("[YouTube] Processing failed:", e);
       } finally {
         setIsProcessingYouTube(false);
       }
     },
     [
-      fetchYouTubeTransposed, addProcessedItem,
-      setAppError, setFile, setShowOriginalYouTube, setSemitones,
-      setPendingSemitones, setAppliedSemitones, setTransposedFromBlob,
-      setOriginalSrc, setQueuedDelta, setPlaying,
+      fetchYouTubeTransposed,
+      addProcessedItem,
+      setAppError,
+      setFile,
+      setShowOriginalYouTube,
+      setSemitones,
+      setPendingSemitones,
+      setAppliedSemitones,
+      setTransposedFromBlob,
+      setOriginalSrc,
+      setQueuedDelta,
+      setPlaying,
       API_BASE_URL,
-    ]
+    ],
   );
 
   // YouTube branch of runTranspose — call this when only URL is active
@@ -236,8 +286,14 @@ export default function useYouTubeTranspose({
 
         let title = youtubeUrl;
         let meta = null;
-        try { title = (await retry(() => fetchYouTubeTitle(youtubeUrl), 3, 500)) || youtubeUrl; } catch {}
-        try { meta = await retry(() => extractMetadata(blob, "audio"), 3, 500); } catch {}
+        try {
+          title =
+            (await retry(() => fetchYouTubeTitle(youtubeUrl), 3, 500)) ||
+            youtubeUrl;
+        } catch {}
+        try {
+          meta = await retry(() => extractMetadata(blob, "audio"), 3, 500);
+        } catch {}
 
         addProcessedItem({
           id: `${youtubeUrl}::${newSemitones}`,
@@ -253,16 +309,26 @@ export default function useYouTubeTranspose({
       } catch (e) {
         if (e.name === "AbortError") return;
         setTransposedFromBlob(null);
-        setAppError("YouTube processing failed: " + (e?.message || "Unknown error"));
+        setAppError(
+          "YouTube processing failed: " + (e?.message || "Unknown error"),
+        );
+        console.error("[YouTube] Transpose failed:", e);
       } finally {
         setIsProcessingYouTube(false);
       }
     },
     [
-      youtubeUrl, fetchYouTubeTransposed, addProcessedItem,
-      setTransposedFromBlob, setAppliedSemitones, setPendingSemitones,
-      setQueuedDelta, setShowOriginalYouTube, setPlaying, setAppError,
-    ]
+      youtubeUrl,
+      fetchYouTubeTransposed,
+      addProcessedItem,
+      setTransposedFromBlob,
+      setAppliedSemitones,
+      setPendingSemitones,
+      setQueuedDelta,
+      setShowOriginalYouTube,
+      setPlaying,
+      setAppError,
+    ],
   );
 
   const cleanup = useCallback(() => {

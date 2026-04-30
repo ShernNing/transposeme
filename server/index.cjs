@@ -1,4 +1,60 @@
 const express = require("express");
+// Dependency check helpers
+const REQUIRED_BINARIES = ["ffmpeg", "rubberband"];
+const REQUIRED_PYTHON = process.platform === "win32" ? "python" : "python3";
+const REQUIRED_PYTHON_MODULES = ["yt-dlp", "essentia"];
+
+async function checkBinary(cmd) {
+  try {
+    await execFileAsync(cmd, ["--version"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function checkPythonModule(module) {
+  try {
+    await execFileAsync(REQUIRED_PYTHON, ["-c", `import ${module}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function checkAllDependencies() {
+  const results = {};
+  for (const bin of REQUIRED_BINARIES) {
+    results[bin] = await checkBinary(bin);
+  }
+  results[REQUIRED_PYTHON] = await checkBinary(REQUIRED_PYTHON);
+  for (const mod of REQUIRED_PYTHON_MODULES) {
+    results[mod] = await checkPythonModule(mod);
+  }
+  return results;
+}
+
+async function printDependencyErrors(results) {
+  let ok = true;
+  for (const [dep, present] of Object.entries(results)) {
+    if (!present) {
+      ok = false;
+      console.error(`\x1b[31m[ERROR]\x1b[0m Missing dependency: ${dep}`);
+    }
+  }
+  if (!ok) {
+    console.error(
+      "\x1b[33mPlease install the missing dependencies and restart the server.\x1b[0m",
+    );
+    console.error("\x1b[33mSee README.md for setup instructions.\x1b[0m");
+    process.exit(1);
+  }
+}
+
+(async () => {
+  const depResults = await checkAllDependencies();
+  await printDependencyErrors(depResults);
+})();
 const cors = require("cors");
 const helmet = require("helmet");
 const { execFile } = require("child_process");
@@ -13,10 +69,10 @@ const YT_TIMEOUT_MS = 120000;
 const RUBBERBAND_TIMEOUT_MS = 120000;
 const PYTHON_TIMEOUT_MS = 60000;
 const MAX_VIDEO_DURATION_SECONDS = 1200;
-const COOKIES_PATH = process.env.COOKIES_PATH || '/app/cookies.txt';
+const COOKIES_PATH = process.env.COOKIES_PATH || "/app/cookies.txt";
 const COOKIES_EXISTS = fs.existsSync(COOKIES_PATH);
-const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
-const CACHE_MAX_SIZE = parseInt(process.env.MAX_CACHE_SIZE || '100', 10);
+const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
+const CACHE_MAX_SIZE = parseInt(process.env.MAX_CACHE_SIZE || "100", 10);
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 class BoundedCache {
@@ -31,14 +87,18 @@ class BoundedCache {
   get(key) {
     const entry = this.map.get(key);
     if (!entry) return undefined;
-    if (this._isExpired(entry)) { this.map.delete(key); return undefined; }
+    if (this._isExpired(entry)) {
+      this.map.delete(key);
+      return undefined;
+    }
     return entry.value;
   }
   has(key) {
     return this.get(key) !== undefined;
   }
   set(key, value) {
-    if (this.map.has(key)) this.map.delete(key); // refresh insertion order
+    if (this.map.has(key))
+      this.map.delete(key); // refresh insertion order
     else if (this.map.size >= this.maxSize) {
       // evict oldest entry
       this.map.delete(this.map.keys().next().value);
@@ -53,25 +113,37 @@ const requestHits = new Map();
 // In-flight job deduplication: jobKey -> Promise
 const pendingJobs = new Map();
 
-
-
 const app = express();
-app.set('trust proxy', 1);
+app.set("trust proxy", 1);
 app.use(helmet());
 
 const corsOptions = {
   origin: CORS_ORIGIN,
-  methods: ['GET', 'POST'],
+  methods: ["GET", "POST"],
 };
 app.use(cors(corsOptions));
-app.use(express.json({ limit: '10kb' }));
+app.use(express.json({ limit: "10kb" }));
 
-// Request logging middleware
+// Log environment info at startup (mask sensitive values)
+function logEnv() {
+  const env = { ...process.env };
+  if (env.PATH) env.PATH = env.PATH.split(":").slice(0, 3).join(":") + "...";
+  if (env.NODE_BINARY) env.NODE_BINARY = "[set]";
+  if (env.IS_BACKEND) env.IS_BACKEND = "[set]";
+  console.log("[startup] Environment:", env);
+}
+logEnv();
+
+// Request logging middleware (detailed)
 app.use((req, res, next) => {
   const start = Date.now();
-  res.on('finish', () => {
+  const logBody =
+    req.method === "POST" ? ` body=${JSON.stringify(req.body)}` : "";
+  res.on("finish", () => {
     const duration = Date.now() - start;
-    console.log(`${req.method} ${req.originalUrl} ${res.statusCode} - ${duration}ms`);
+    console.log(
+      `[request] ${req.method} ${req.originalUrl} ${res.statusCode} - ${duration}ms${logBody}`,
+    );
   });
   next();
 });
@@ -84,7 +156,7 @@ function cleanupTmpDir() {
   const maxAge = 6 * 60 * 60 * 1000; // 6 hours
   fs.readdir(tmpDir, (err, files) => {
     if (err) return;
-    files.forEach(file => {
+    files.forEach((file) => {
       const filePath = path.join(tmpDir, file);
       fs.stat(filePath, (err, stats) => {
         if (!err && now - stats.mtimeMs > maxAge) {
@@ -113,23 +185,27 @@ app.get("/", (_req, res) => {
     routes: {
       health: "/api/health",
       youtubeKey: "/api/youtube-key (POST)",
-      youtubeTranspose: "/api/youtube-transpose (POST)"
-    }
+      youtubeTranspose: "/api/youtube-transpose (POST)",
+    },
   });
 });
 
 // Global error handlers
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception:", err);
 });
-process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled Rejection:', reason);
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled Rejection:", reason);
 });
 
-
-const YOUTUBE_URL_RE = /^https?:\/\/(www\.)?(youtube\.com\/watch|youtu\.be\/|youtube\.com\/shorts\/)/;
+const YOUTUBE_URL_RE =
+  /^https?:\/\/(www\.)?(youtube\.com\/watch|youtu\.be\/|youtube\.com\/shorts\/)/;
 function isValidYouTubeUrl(url) {
-  try { new URL(url); } catch { return false; }
+  try {
+    new URL(url);
+  } catch {
+    return false;
+  }
   return YOUTUBE_URL_RE.test(url);
 }
 
@@ -138,7 +214,12 @@ function safeUnlink(filePath) {
 }
 
 function getClientIp(req) {
-  return req.ip || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown";
+  return (
+    req.ip ||
+    req.headers["x-forwarded-for"] ||
+    req.socket.remoteAddress ||
+    "unknown"
+  );
 }
 
 function enforceRateLimit(req, res) {
@@ -160,11 +241,17 @@ function enforceRateLimit(req, res) {
 
 async function downloadAudio(url, audioPath) {
   const ytDlpArgs = [
-    "--extractor-args", "youtube:player_client=android",
-    "--proxy", "",
-    "--match-filter", `duration <= ${MAX_VIDEO_DURATION_SECONDS}`,
-    "-x", "--audio-format", "wav",
-    "-o", audioPath,
+    "--extractor-args",
+    "youtube:player_client=android",
+    "--proxy",
+    "",
+    "--match-filter",
+    `duration <= ${MAX_VIDEO_DURATION_SECONDS}`,
+    "-x",
+    "--audio-format",
+    "wav",
+    "-o",
+    audioPath,
   ];
   if (COOKIES_EXISTS) {
     ytDlpArgs.unshift("--cookies", COOKIES_PATH);
@@ -172,14 +259,19 @@ async function downloadAudio(url, audioPath) {
   ytDlpArgs.push(url);
 
   await new Promise((resolve, reject) => {
-    execFile("yt-dlp", ytDlpArgs, { env: getDirectNetworkEnv(), timeout: YT_TIMEOUT_MS }, (err, _stdout, stderr) => {
-      if (err) {
-        const e = new Error(stderr || err.message);
-        e.stderr = stderr;
-        return reject(e);
-      }
-      resolve();
-    });
+    execFile(
+      "yt-dlp",
+      ytDlpArgs,
+      { env: getDirectNetworkEnv(), timeout: YT_TIMEOUT_MS },
+      (err, _stdout, stderr) => {
+        if (err) {
+          const e = new Error(stderr || err.message);
+          e.stderr = stderr;
+          return reject(e);
+        }
+        resolve();
+      },
+    );
   });
 }
 
@@ -208,7 +300,11 @@ let depStatusCache = null;
 let depStatusCachedAt = 0;
 
 async function getDependencyStatus({ fresh = false } = {}) {
-  if (!fresh && depStatusCache && Date.now() - depStatusCachedAt < DEP_STATUS_TTL_MS) {
+  if (
+    !fresh &&
+    depStatusCache &&
+    Date.now() - depStatusCachedAt < DEP_STATUS_TTL_MS
+  ) {
     return depStatusCache;
   }
   const pythonBin = process.platform === "win32" ? "python" : "python3";
@@ -224,14 +320,22 @@ async function getDependencyStatus({ fresh = false } = {}) {
     essentiaOk = await checkCommand(pythonBin, ["-c", "import essentia"]);
   }
 
-  depStatusCache = { ytDlpOk, rubberbandOk, ffmpegOk, pythonOk, essentiaOk, pythonBin };
+  depStatusCache = {
+    ytDlpOk,
+    rubberbandOk,
+    ffmpegOk,
+    pythonOk,
+    essentiaOk,
+    pythonBin,
+  };
   depStatusCachedAt = Date.now();
   return depStatusCache;
 }
 
 app.get("/api/health", async (_req, res) => {
   const status = await getDependencyStatus({ fresh: true });
-  const ok = status.ytDlpOk && status.rubberbandOk && status.ffmpegOk && status.pythonOk;
+  const ok =
+    status.ytDlpOk && status.rubberbandOk && status.ffmpegOk && status.pythonOk;
   const { pythonBin: _pythonBin, ...publicStatus } = status;
   res.status(ok ? 200 : 503).json({
     ok,
@@ -245,7 +349,11 @@ app.post("/api/youtube-key", async (req, res) => {
   if (!enforceRateLimit(req, res)) return;
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: "Missing YouTube URL" });
-  if (!isValidYouTubeUrl(url)) return res.status(400).json({ error: "Invalid YouTube URL", hint: "URL must be a valid youtube.com or youtu.be link." });
+  if (!isValidYouTubeUrl(url))
+    return res.status(400).json({
+      error: "Invalid YouTube URL",
+      hint: "URL must be a valid youtube.com or youtu.be link.",
+    });
   if (keyCache.has(url)) {
     return res.json({ key: keyCache.get(url), cached: true });
   }
@@ -254,7 +362,9 @@ app.post("/api/youtube-key", async (req, res) => {
       const key = await pendingJobs.get(url);
       return res.json({ key, cached: true });
     } catch (e) {
-      return res.status(500).json({ error: "Failed to detect key", details: e.message });
+      return res
+        .status(500)
+        .json({ error: "Failed to detect key", details: e.message });
     }
   }
   const deps = await getDependencyStatus();
@@ -308,7 +418,11 @@ app.post("/api/youtube-key", async (req, res) => {
     const key = await jobPromise;
     res.json({ key, cached: false });
   } catch (e) {
-    res.status(500).json({ error: "Failed to process audio", details: e.message, hint: "Video may be unavailable, blocked, too long, or network/proxy is restricted." });
+    res.status(500).json({
+      error: "Failed to process audio",
+      details: e.message,
+      hint: "Video may be unavailable, blocked, too long, or network/proxy is restricted.",
+    });
   } finally {
     pendingJobs.delete(url);
   }
@@ -320,13 +434,22 @@ app.post("/api/youtube-transpose", async (req, res) => {
   if (!enforceRateLimit(req, res)) return;
   const { url, semitones = 0 } = req.body;
   if (!url) return res.status(400).json({ error: "Missing YouTube URL" });
-  if (!isValidYouTubeUrl(url)) return res.status(400).json({ error: "Invalid YouTube URL", hint: "URL must be a valid youtube.com or youtu.be link." });
+  if (!isValidYouTubeUrl(url))
+    return res.status(400).json({
+      error: "Invalid YouTube URL",
+      hint: "URL must be a valid youtube.com or youtu.be link.",
+    });
   const semitoneNum = Number(semitones);
   if (Number.isNaN(semitoneNum) || semitoneNum < -12 || semitoneNum > 12) {
-    return res.status(400).json({ error: "Semitones must be between -12 and 12." });
+    return res
+      .status(400)
+      .json({ error: "Semitones must be between -12 and 12." });
   }
   const cacheKey = `${url}::${semitoneNum}`;
-  if (transposeCache.has(cacheKey) && fs.existsSync(transposeCache.get(cacheKey))) {
+  if (
+    transposeCache.has(cacheKey) &&
+    fs.existsSync(transposeCache.get(cacheKey))
+  ) {
     return res.download(transposeCache.get(cacheKey), "transposed.wav");
   }
   if (pendingJobs.has(cacheKey)) {
@@ -334,7 +457,9 @@ app.post("/api/youtube-transpose", async (req, res) => {
       const outPath = await pendingJobs.get(cacheKey);
       return res.download(outPath, "transposed.wav");
     } catch (e) {
-      return res.status(500).json({ error: "Failed to transpose audio", details: e.message });
+      return res
+        .status(500)
+        .json({ error: "Failed to transpose audio", details: e.message });
     }
   }
   const deps = await getDependencyStatus();
@@ -370,14 +495,29 @@ app.post("/api/youtube-transpose", async (req, res) => {
       await new Promise((resolve, reject) => {
         execFile(
           "ffmpeg",
-          ["-y", "-i", audioPath, "-acodec", "pcm_s16le", "-ar", "44100", pcmPath],
+          [
+            "-y",
+            "-i",
+            audioPath,
+            "-acodec",
+            "pcm_s16le",
+            "-ar",
+            "44100",
+            pcmPath,
+          ],
           { timeout: 30000 },
           (err, _stdout, stderr) => {
             if (err) return reject(new Error(stderr || err));
-            try { fs.unlinkSync(audioPath); } catch {}
-            try { fs.renameSync(pcmPath, audioPath); } catch (renameErr) { return reject(renameErr); }
+            try {
+              fs.unlinkSync(audioPath);
+            } catch {}
+            try {
+              fs.renameSync(pcmPath, audioPath);
+            } catch (renameErr) {
+              return reject(renameErr);
+            }
             resolve();
-          }
+          },
         );
       });
 
@@ -385,7 +525,14 @@ app.post("/api/youtube-transpose", async (req, res) => {
         await new Promise((resolve, reject) => {
           execFile(
             "rubberband",
-            ["-3", "--formant", "-p", semitoneNum.toString(), audioPath, outPath],
+            [
+              "-3",
+              "--formant",
+              "-p",
+              semitoneNum.toString(),
+              audioPath,
+              outPath,
+            ],
             { timeout: RUBBERBAND_TIMEOUT_MS },
             (err, _stdout, stderr) => {
               if (err) return reject(new Error(stderr || err));
@@ -407,9 +554,15 @@ app.post("/api/youtube-transpose", async (req, res) => {
   pendingJobs.set(cacheKey, jobPromise);
   try {
     const outPath = await jobPromise;
-    res.download(outPath, "transposed.wav", (err) => { if (err) safeUnlink(outPath); });
+    res.download(outPath, "transposed.wav", (err) => {
+      if (err) safeUnlink(outPath);
+    });
   } catch (e) {
-    res.status(500).json({ error: "Failed to process audio", details: e.message, hint: "Video may be unavailable, blocked, too long, or network/proxy is restricted." });
+    res.status(500).json({
+      error: "Failed to process audio",
+      details: e.message,
+      hint: "Video may be unavailable, blocked, too long, or network/proxy is restricted.",
+    });
   } finally {
     pendingJobs.delete(cacheKey);
   }
@@ -431,7 +584,9 @@ const server = app.listen(PORT, async () => {
   if (!deps.pythonOk) {
     console.warn("Dependency missing: python3");
   } else if (!deps.essentiaOk) {
-    console.warn("Python module missing: essentia (youtube-key endpoint will fail)");
+    console.warn(
+      "Python module missing: essentia (youtube-key endpoint will fail)",
+    );
   }
 });
 
@@ -439,22 +594,24 @@ const server = app.listen(PORT, async () => {
 function shutdown(signal) {
   console.log(`\nReceived ${signal}. Shutting down gracefully...`);
   server.close(() => {
-    console.log('Closed out remaining connections.');
+    console.log("Closed out remaining connections.");
     // Clean up temp files
     try {
       cleanupTmpDir();
-      console.log('Temp files cleaned up.');
+      console.log("Temp files cleaned up.");
     } catch (e) {
-      console.error('Error during temp cleanup:', e);
+      console.error("Error during temp cleanup:", e);
     }
     process.exit(0);
   });
   // Force exit if not closed in 10s
   setTimeout(() => {
-    console.error('Could not close connections in time, forcefully shutting down');
+    console.error(
+      "Could not close connections in time, forcefully shutting down",
+    );
     process.exit(1);
   }, 10000);
 }
 
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
