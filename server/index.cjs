@@ -1,33 +1,114 @@
+const path = require("path");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
+const execFileAsync = promisify(execFile);
 const express = require("express");
-// Dependency check helpers
-const REQUIRED_BINARIES = ["ffmpeg", "rubberband"];
+// Set up paths to bundled binaries
+// Debug: print PATH to diagnose python3 and yt-dlp detection issues
+console.error("[DEBUG] process.env.PATH:", process.env.PATH);
+const BIN_DIR = path.join(__dirname, "..", "resources", "bin");
+const FFMPEG_BIN = path.join(BIN_DIR, "ffmpeg");
+const YTDLP_PY = path.join(BIN_DIR, "yt-dlp.py");
+const REQUIRED_BINARIES = [FFMPEG_BIN, "rubberband"];
 const REQUIRED_PYTHON = process.platform === "win32" ? "python" : "python3";
 const REQUIRED_PYTHON_MODULES = ["yt-dlp", "essentia"];
 
-async function checkBinary(cmd) {
+async function checkBinary(cmd, args = ["--version"]) {
+  // For ffmpeg, try several version flags
+  if (cmd.toString().includes("ffmpeg")) {
+    const flags = [["-version"], ["-v"], ["-V"], ["--version"]];
+    for (const flag of flags) {
+      try {
+        await execFileAsync(cmd, flag);
+        return true;
+      } catch (err) {
+        // Try next flag
+      }
+    }
+    console.error(`[depcheck] ${cmd} error: All version flags failed`);
+    return false;
+  }
+  const fs = require("fs");
+  if (cmd === YTDLP_PY) {
+    console.error(`[depcheck-debug] yt-dlp.py path:`, cmd);
+    try {
+      const exists = fs.existsSync(cmd);
+      console.error(`[depcheck-debug] yt-dlp.py existsSync:`, exists);
+      if (exists) {
+        const stat = fs.statSync(cmd);
+        console.error(`[depcheck-debug] yt-dlp.py statSync:`, stat);
+      }
+    } catch (fsErr) {
+      console.error(`[depcheck-debug] yt-dlp.py fs error:`, fsErr);
+    }
+    console.error(`[depcheck-debug] yt-dlp.py about to execFileAsync`);
+    try {
+      await execFileAsync("python3", [cmd, ...args]);
+      console.error(`[depcheck-debug] yt-dlp.py execFileAsync SUCCESS`);
+      return true;
+    } catch (err) {
+      console.error(`[depcheck-debug] yt-dlp.py execFileAsync FAIL`);
+      console.error(`[depcheck-debug] yt-dlp.py exec error object:`, err);
+      if (err.stderr || err.message) {
+        console.error(
+          `[depcheck-debug] yt-dlp.py error:`,
+          err.stderr || err.message,
+        );
+      } else {
+        console.error(`[depcheck-debug] yt-dlp.py failed with unknown error.`);
+      }
+      return false;
+    }
+  }
+  // For string commands like 'rubberband', just try execFileAsync
   try {
-    await execFileAsync(cmd, ["--version"]);
+    await execFileAsync(cmd, args);
     return true;
-  } catch {
+  } catch (err) {
     return false;
   }
 }
 
 async function checkPythonModule(module) {
   try {
+    // Try importing the module directly
     await execFileAsync(REQUIRED_PYTHON, ["-c", `import ${module}`]);
     return true;
-  } catch {
+  } catch (err1) {
+    // For yt-dlp, try importing yt_dlp.version as a fallback
+    if (module === "yt-dlp") {
+      try {
+        await execFileAsync(REQUIRED_PYTHON, ["-c", "import yt_dlp.version"]);
+        return true;
+      } catch (err2) {
+        console.error(
+          "[depcheck-debug] yt-dlp Python import failed:",
+          err1,
+          err2,
+        );
+        return false;
+      }
+    }
     return false;
   }
 }
 
 async function checkAllDependencies() {
   const results = {};
+  const path = require("path");
   for (const bin of REQUIRED_BINARIES) {
-    results[bin] = await checkBinary(bin);
+    // Use the base name for reporting, but normalize rubberband to exactly 'rubberband'
+    let label = path.basename(bin).replace(".py", "");
+    if (label.startsWith("rubberband")) label = "rubberband";
+    results[label] = await checkBinary(bin);
   }
-  results[REQUIRED_PYTHON] = await checkBinary(REQUIRED_PYTHON);
+  // Check python3 availability
+  try {
+    await execFileAsync(REQUIRED_PYTHON, ["--version"]);
+    results["python3"] = true;
+  } catch {
+    results["python3"] = false;
+  }
   for (const mod of REQUIRED_PYTHON_MODULES) {
     results[mod] = await checkPythonModule(mod);
   }
@@ -35,6 +116,7 @@ async function checkAllDependencies() {
 }
 
 async function printDependencyErrors(results) {
+  console.error("[depcheck-debug] Dependency check results:", results);
   let ok = true;
   for (const [dep, present] of Object.entries(results)) {
     if (!present) {
@@ -57,12 +139,9 @@ async function printDependencyErrors(results) {
 })();
 const cors = require("cors");
 const helmet = require("helmet");
-const { execFile } = require("child_process");
 const fs = require("fs");
 const { v4: uuidv4 } = require("uuid");
-const path = require("path");
-const { promisify } = require("util");
-const execFileAsync = promisify(execFile);
+// const path = require("path");
 const REQUEST_WINDOW_MS = 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 20;
 const YT_TIMEOUT_MS = 120000;
@@ -260,8 +339,8 @@ async function downloadAudio(url, audioPath) {
 
   await new Promise((resolve, reject) => {
     execFile(
-      "yt-dlp",
-      ytDlpArgs,
+      "python3",
+      [YTDLP_PY, ...ytDlpArgs],
       { env: getDirectNetworkEnv(), timeout: YT_TIMEOUT_MS },
       (err, _stdout, stderr) => {
         if (err) {
@@ -287,11 +366,65 @@ function getDirectNetworkEnv() {
 }
 
 async function checkCommand(command, args = ["--version"]) {
-  try {
-    await execFileAsync(command, args);
-    return true;
-  } catch {
-    return false;
+  const { spawn } = require("child_process");
+  // Use spawn for yt-dlp, execFileAsync for others
+  if (command.includes("yt-dlp")) {
+    // Workaround: run yt-dlp via python3 interpreter
+    try {
+      const pythonCmd = "python3";
+      const ytDlpPath = command;
+      const cmdArgs = [ytDlpPath, ...args];
+      console.error(
+        "[depcheck-debug] checkCommand (python3): running",
+        pythonCmd,
+        cmdArgs,
+      );
+      const { stdout, stderr } = await execFileAsync(pythonCmd, cmdArgs, {
+        env: process.env,
+        timeout: 3000,
+      });
+      console.error("[depcheck-debug] checkCommand (python3): success", {
+        stdout,
+        stderr,
+      });
+      return true;
+    } catch (err) {
+      console.error("[depcheck-debug] checkCommand (python3): error", {
+        message: err.message,
+        code: err.code,
+        signal: err.signal,
+        killed: err.killed,
+        stack: err.stack,
+        stdout: err.stdout,
+        stderr: err.stderr,
+        ...err,
+      });
+      return false;
+    }
+  } else {
+    try {
+      console.error("[depcheck-debug] checkCommand: running", command, args);
+      const { stdout, stderr } = await execFileAsync(command, args, {
+        timeout: 3000,
+      });
+      console.error("[depcheck-debug] checkCommand: success", {
+        stdout,
+        stderr,
+      });
+      return true;
+    } catch (err) {
+      console.error("[depcheck-debug] checkCommand: error", {
+        message: err.message,
+        code: err.code,
+        signal: err.signal,
+        killed: err.killed,
+        stack: err.stack,
+        stdout: err.stdout,
+        stderr: err.stderr,
+        ...err,
+      });
+      return false;
+    }
   }
 }
 
@@ -300,6 +433,20 @@ let depStatusCache = null;
 let depStatusCachedAt = 0;
 
 async function getDependencyStatus({ fresh = false } = {}) {
+  // Debug: print the yt-dlp path and existence
+  const fs = require("fs");
+  console.error("[depcheck-debug] YTDLP_PY:", YTDLP_PY);
+  console.error(
+    "[depcheck-debug] fs.existsSync(YTDLP_PY):",
+    fs.existsSync(YTDLP_PY),
+  );
+  let pythonBin = process.platform === "win32" ? "python" : "python3";
+  console.error("[depcheck-debug] getDependencyStatus checkCommand args:", {
+    ytDlp: YTDLP_PY,
+    rubberband: "rubberband",
+    python: pythonBin,
+    ffmpeg: FFMPEG_BIN,
+  });
   if (
     !fresh &&
     depStatusCache &&
@@ -307,12 +454,12 @@ async function getDependencyStatus({ fresh = false } = {}) {
   ) {
     return depStatusCache;
   }
-  const pythonBin = process.platform === "win32" ? "python" : "python3";
+  // Removed duplicate pythonBin declaration
   const [ytDlpOk, rubberbandOk, pythonOk, ffmpegOk] = await Promise.all([
-    checkCommand("yt-dlp"),
+    checkCommand(YTDLP_PY, ["--version"]),
     checkCommand("rubberband", ["--version"]),
     checkCommand(pythonBin, ["--version"]),
-    checkCommand("ffmpeg", ["-version"]),
+    checkCommand(FFMPEG_BIN, ["-version"]),
   ]);
 
   let essentiaOk = false;
@@ -371,7 +518,7 @@ app.post("/api/youtube-key", async (req, res) => {
   if (!deps.ytDlpOk) {
     return res.status(500).json({
       error: "Missing required dependency: yt-dlp",
-      hint: "Install yt-dlp and ensure it is available in PATH.",
+      hint: "yt-dlp.py missing or not executable in resources/bin/yt-dlp.py.",
     });
   }
   if (!deps.pythonOk) {
@@ -478,7 +625,7 @@ app.post("/api/youtube-transpose", async (req, res) => {
   if (!deps.ffmpegOk) {
     return res.status(500).json({
       error: "Missing required dependency: ffmpeg",
-      hint: "Install ffmpeg and ensure it is available in PATH.",
+      hint: "ffmpeg binary missing or not executable in resources/bin/ffmpeg.",
     });
   }
   const jobPromise = (async () => {
@@ -494,7 +641,7 @@ app.post("/api/youtube-transpose", async (req, res) => {
       const pcmPath = path.join(tmpDir, `${id}-pcm.wav`);
       await new Promise((resolve, reject) => {
         execFile(
-          "ffmpeg",
+          FFMPEG_BIN,
           [
             "-y",
             "-i",
