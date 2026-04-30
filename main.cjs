@@ -19,23 +19,33 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // Start backend server using Node, not Electron
-  const nodeBinary = process.env.NODE_BINARY || process.argv[0] || "node";
-  backendProcess = spawn(
-    nodeBinary,
-    [path.join(__dirname, "server", "index.cjs")],
-    {
-      stdio: "inherit",
-      env: { ...process.env, PORT: process.env.BACKEND_PORT || "4000" },
-    },
-  );
+  // Prevent recursive Electron spawn: only spawn backend if not running as backend
+  const isElectron = !!process.versions.electron;
+  const isBackend = process.env.IS_BACKEND === "1";
 
-  backendProcess.on("error", (err) => {
-    console.error("Failed to start backend process:", err);
-  });
-  backendProcess.on("exit", (code, signal) => {
-    console.log(`Backend process exited with code ${code}, signal ${signal}`);
-  });
+  if (!isBackend) {
+    // Start backend server using Node, not Electron
+    const nodeBinary = process.env.NODE_BINARY || process.argv[0] || "node";
+    backendProcess = spawn(
+      nodeBinary,
+      [path.join(__dirname, "server", "index.cjs")],
+      {
+        stdio: "inherit",
+        env: {
+          ...process.env,
+          PORT: process.env.BACKEND_PORT || "4000",
+          IS_BACKEND: "1",
+        },
+      },
+    );
+
+    backendProcess.on("error", (err) => {
+      console.error("Failed to start backend process:", err);
+    });
+    backendProcess.on("exit", (code, signal) => {
+      console.log(`Backend process exited with code ${code}, signal ${signal}`);
+    });
+  }
 
   createWindow();
 
