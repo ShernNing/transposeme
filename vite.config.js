@@ -1,12 +1,50 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { VitePWA } from "vite-plugin-pwa";
 
-// https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: "autoUpdate",
+      includeAssets: ["transposeme-icon.svg", "transposeme-icon.png"],
+      manifest: {
+        name: "TransposeMe",
+        short_name: "TransposeMe",
+        description: "Shift pitch & tempo of YouTube videos and audio files — locally, instantly.",
+        theme_color: "#1a202c",
+        background_color: "#1a202c",
+        display: "standalone",
+        start_url: "/",
+        scope: "/",
+        icons: [
+          {
+            src: "transposeme-icon.svg",
+            sizes: "any",
+            type: "image/svg+xml",
+            purpose: "any",
+          },
+          {
+            src: "transposeme-icon.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "any maskable",
+          },
+        ],
+      },
+      workbox: {
+        globPatterns: ["**/*.{js,css,html,wasm,svg,png,ico,txt}"],
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/transposeme-server\.onrender\.com\/api\//,
+            handler: "NetworkOnly",
+          },
+        ],
+      },
+    }),
+  ],
   base: "./",
   server: {
-    // Proxy /api to the Express backend so VITE_API_BASE_URL is not needed in dev
     proxy: {
       "/api": {
         target: "http://localhost:4000",
@@ -15,7 +53,6 @@ export default defineConfig({
     },
   },
   build: {
-    // Warn at 1MB instead of default 500KB (app has heavy WASM deps)
     chunkSizeWarningLimit: 1024,
   },
 });

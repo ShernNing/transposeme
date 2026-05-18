@@ -43,7 +43,8 @@
       "Bash(yt-dlp --extractor-args \"youtube:player_client=tv_downgraded,web_safari\" --simulate \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\")",
       "Bash(curl -s https://api.github.com/repos/denoland/deno/releases/latest)",
       "Bash(yt-dlp --remote-components ejs:github --extractor-args \"youtube:player_client=default\" --proxy \"\" --simulate \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\")",
-      "Bash(python3 -c \"import yt_dlp.jsc; print\\([x for x in dir\\(yt_dlp.jsc\\) if not x.startswith\\('_'\\)]\\)\")"
+      "Bash(python3 -c \"import yt_dlp.jsc; print\\([x for x in dir\\(yt_dlp.jsc\\) if not x.startswith\\('_'\\)]\\)\")",
+      "Bash(npm install *)"
     ]
   }
 }
