@@ -39,7 +39,9 @@
       "Bash(python3)",
       "Bash(yt-dlp --simulate \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\")",
       "Bash(yt-dlp --extractor-args \"youtube:player_client=android_vr\" --simulate \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\")",
-      "Bash(yt-dlp --extractor-args \"youtube:player_client=android_vr\" --proxy \"\" -x --audio-format wav -o \"/tmp/test-audio.%\\(ext\\)s\" --simulate \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\")"
+      "Bash(yt-dlp --extractor-args \"youtube:player_client=android_vr\" --proxy \"\" -x --audio-format wav -o \"/tmp/test-audio.%\\(ext\\)s\" --simulate \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\")",
+      "Bash(yt-dlp --extractor-args \"youtube:player_client=tv_downgraded,web_safari\" --simulate \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\")",
+      "Bash(curl -s https://api.github.com/repos/denoland/deno/releases/latest)"
     ]
   }
 }
