@@ -677,7 +677,7 @@ app.post("/api/youtube-transpose", async (req, res) => {
         });
 
         const timeRatio = (1 / Math.pow(2, semitoneNum / 12)).toFixed(6);
-        const rbArgs = ["--formant"];
+        const rbArgs = ["--formant", "--ignore-clipping"];
         if (isTempo) {
           rbArgs.push("-t", timeRatio);
         } else {
