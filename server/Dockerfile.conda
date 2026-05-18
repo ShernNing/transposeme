@@ -9,7 +9,7 @@ RUN apt-get update && \
 
 # Install Python dependencies (yt-dlp required; essentia optional for key detection)
 RUN pip install --upgrade pip && \
-    pip install --upgrade yt-dlp && \
+    pip install --upgrade --no-cache-dir yt-dlp && \
     pip install essentia || echo "[warn] essentia install failed — youtube-key endpoint will be unavailable"
 
 # Install Node.js (from NodeSource)

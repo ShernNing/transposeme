@@ -30,7 +30,16 @@
       "mcp__Claude_in_Chrome__list_connected_browsers",
       "Bash(npm run *)",
       "Bash(node -e \"const os = require\\('os'\\); console.log\\('CPUs:', os.cpus\\(\\).length\\);\")",
-      "Bash(xargs ls -la)"
+      "Bash(xargs ls -la)",
+      "Bash(yt-dlp --help)",
+      "Bash(python3 -c \"import yt_dlp; help\\(yt_dlp.extractor.youtube.YoutubeIE\\)\")",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -c \"import yt_dlp; print\\(yt_dlp.version.__version__\\)\")",
+      "Bash(pip show *)",
+      "Bash(python3)",
+      "Bash(yt-dlp --simulate \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\")",
+      "Bash(yt-dlp --extractor-args \"youtube:player_client=android_vr\" --simulate \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\")",
+      "Bash(yt-dlp --extractor-args \"youtube:player_client=android_vr\" --proxy \"\" -x --audio-format wav -o \"/tmp/test-audio.%\\(ext\\)s\" --simulate \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\")"
     ]
   }
 }

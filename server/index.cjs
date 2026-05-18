@@ -349,7 +349,7 @@ async function getWritableCookiesPath() {
 async function downloadAudio(url, audioPath) {
   const ytDlpArgs = [
     "--extractor-args",
-    "youtube:player_client=web",
+    "youtube:player_client=android_vr",
     "--proxy",
     "",
     "--match-filter",
