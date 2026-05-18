@@ -6,6 +6,7 @@ services:
     dockerfilePath: server/Dockerfile.conda
     dockerContext: server
     autoDeploy: true
+    healthCheckPath: /api/health
     envVars:
       - key: PORT
         value: "4000"
