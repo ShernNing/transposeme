@@ -55,7 +55,9 @@
       "Bash(gh api *)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(curl -s https://transposeme-server.onrender.com/api/status)",
+      "Bash(git rm *)"
     ]
   }
 }
