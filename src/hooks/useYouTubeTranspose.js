@@ -73,20 +73,48 @@ export default function useYouTubeTranspose({
   setAppError,
   addProcessedItem,
   API_BASE_URL,
+  tempoMode = false,
 }) {
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [youtubeKey, setYoutubeKey] = useState("");
   const [isProcessingYouTube, setIsProcessingYouTube] = useState(false);
   const [isAnalyzingKey, setIsAnalyzingKey] = useState(false);
+  const [processingStep, setProcessingStep] = useState("");
 
   const keyCacheRef = useRef(new Map());
   const youtubeCacheRef = useRef(new Map());
   const abortRef = useRef(null);
   const debounceRef = useRef(null);
 
+  const fetchKeyForUrl = useCallback(
+    async (url) => {
+      if (keyCacheRef.current.has(url)) {
+        return keyCacheRef.current.get(url);
+      }
+      console.log("[API] POST", `${API_BASE_URL}/api/youtube-key`, { url });
+      const response = await fetch(`${API_BASE_URL}/api/youtube-key`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      console.log("[API] Response", response.status, response.statusText);
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error("[API] Error response (youtube-key):", errText);
+        throw new Error(prettyApiError("Failed to analyze song key.", errText));
+      }
+      const data = await response.json();
+      const detected = data?.key || "Unknown";
+      evictCache(keyCacheRef.current, CONFIG.KEY_CACHE_MAX);
+      keyCacheRef.current.set(url, detected);
+      return detected;
+    },
+    [API_BASE_URL],
+  );
+
   const fetchYouTubeTransposed = useCallback(
-    async (url, semitones) => {
-      const cacheKey = `${url}::${semitones}`;
+    async (url, semitones, isTempo = false) => {
+      const cacheKey = `${url}::${semitones}::${isTempo ? "t" : "p"}`;
       if (youtubeCacheRef.current.has(cacheKey)) {
         return youtubeCacheRef.current.get(cacheKey);
       }
@@ -96,13 +124,14 @@ export default function useYouTubeTranspose({
       console.log("[API] POST", `${API_BASE_URL}/api/youtube-transpose`, {
         url,
         semitones,
+        tempoMode: isTempo,
       });
       let response;
       try {
         response = await fetch(`${API_BASE_URL}/api/youtube-transpose`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url, semitones }),
+          body: JSON.stringify({ url, semitones, tempoMode: isTempo }),
           signal: controller.signal,
         });
         console.log("[API] Response", response.status, response.statusText);
@@ -128,41 +157,11 @@ export default function useYouTubeTranspose({
   const handleAnalyzeKey = useCallback(
     async (urlOverride) => {
       const url = urlOverride || youtubeUrl;
-      if (!url) {
-        setAppError("Load a YouTube URL first.");
-        return;
-      }
+      if (!url) { setAppError("Load a YouTube URL first."); return; }
       setAppError("");
-      if (keyCacheRef.current.has(url)) {
-        setYoutubeKey(keyCacheRef.current.get(url));
-        return;
-      }
       setIsAnalyzingKey(true);
       try {
-        console.log("[API] POST", `${API_BASE_URL}/api/youtube-key`, { url });
-        let response;
-        try {
-          response = await fetch(`${API_BASE_URL}/api/youtube-key`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url }),
-          });
-          console.log("[API] Response", response.status, response.statusText);
-        } catch (err) {
-          console.error("[API] Network error (youtube-key):", err);
-          throw err;
-        }
-        if (!response.ok) {
-          const errText = await response.text();
-          console.error("[API] Error response (youtube-key):", errText);
-          throw new Error(
-            prettyApiError("Failed to analyze song key.", errText),
-          );
-        }
-        const data = await response.json();
-        const detected = data?.key || "Unknown";
-        evictCache(keyCacheRef.current, CONFIG.KEY_CACHE_MAX);
-        keyCacheRef.current.set(url, detected);
+        const detected = await fetchKeyForUrl(url);
         setYoutubeKey(detected);
       } catch (e) {
         setAppError("Key analysis failed: " + (e?.message || "Unknown error"));
@@ -170,7 +169,7 @@ export default function useYouTubeTranspose({
         setIsAnalyzingKey(false);
       }
     },
-    [youtubeUrl, API_BASE_URL, setAppError],
+    [youtubeUrl, fetchKeyForUrl, setAppError],
   );
 
   const handleYouTube = useCallback(
@@ -186,8 +185,10 @@ export default function useYouTubeTranspose({
       setTransposedFromBlob(null);
       setOriginalSrc(null);
       setIsProcessingYouTube(true);
+      setProcessingStep("1/3 Downloading & converting audio…");
       try {
-        const blob = await fetchYouTubeTransposed(url, 0);
+        const blob = await fetchYouTubeTransposed(url, 0, false);
+        setProcessingStep("2/3 Extracting metadata…");
         setTransposedFromBlob(blob);
         setOriginalSrc(URL.createObjectURL(blob));
         setAppliedSemitones(0);
@@ -198,7 +199,7 @@ export default function useYouTubeTranspose({
 
         const [meta, title] = await Promise.all([
           extractMetadata(blob, "audio"),
-          fetchYouTubeTitle(url),
+          retry(() => fetchYouTubeTitle(url), 3, 500),
         ]);
         addProcessedItem({
           id: `${url}::0`,
@@ -212,35 +213,16 @@ export default function useYouTubeTranspose({
           metadata: meta,
         });
 
-        // Auto-detect key
-        if (keyCacheRef.current.has(url)) {
-          setYoutubeKey(keyCacheRef.current.get(url));
-        } else {
-          setIsAnalyzingKey(true);
-          try {
-            console.log("[API] POST", `${API_BASE_URL}/api/youtube-key`, {
-              url,
-            });
-            const keyResp = await fetch(`${API_BASE_URL}/api/youtube-key`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ url }),
-            });
-            console.log("[API] Response", keyResp.status, keyResp.statusText);
-            if (keyResp.ok) {
-              const keyData = await keyResp.json();
-              const detected = keyData?.key || "Unknown";
-              keyCacheRef.current.set(url, detected);
-              setYoutubeKey(detected);
-            } else {
-              const errText = await keyResp.text();
-              console.error("[API] Error response (youtube-key):", errText);
-            }
-          } catch (err) {
-            console.error("[API] Network error (youtube-key):", err);
-          } finally {
-            setIsAnalyzingKey(false);
-          }
+        // Auto-detect key (non-critical — errors are logged, not surfaced to user)
+        setProcessingStep("3/3 Detecting song key…");
+        setIsAnalyzingKey(true);
+        try {
+          const detected = await fetchKeyForUrl(url);
+          setYoutubeKey(detected);
+        } catch (err) {
+          console.error("[YouTube] Key detection failed:", err);
+        } finally {
+          setIsAnalyzingKey(false);
         }
       } catch (e) {
         if (e.name === "AbortError") return;
@@ -251,10 +233,12 @@ export default function useYouTubeTranspose({
         console.error("[YouTube] Processing failed:", e);
       } finally {
         setIsProcessingYouTube(false);
+        setProcessingStep("");
       }
     },
     [
       fetchYouTubeTransposed,
+      fetchKeyForUrl,
       addProcessedItem,
       setAppError,
       setFile,
@@ -266,7 +250,6 @@ export default function useYouTubeTranspose({
       setOriginalSrc,
       setQueuedDelta,
       setPlaying,
-      API_BASE_URL,
     ],
   );
 
@@ -274,8 +257,16 @@ export default function useYouTubeTranspose({
   const runYouTubeTranspose = useCallback(
     async (newSemitones, { currentTime = 0, setSeekTo } = {}) => {
       setIsProcessingYouTube(true);
+      setProcessingStep(
+        newSemitones === 0
+          ? "1/3 Downloading audio…"
+          : tempoMode
+          ? "Applying tempo stretch…"
+          : "Applying pitch shift…",
+      );
       try {
-        const blob = await fetchYouTubeTransposed(youtubeUrl, newSemitones);
+        const blob = await fetchYouTubeTransposed(youtubeUrl, newSemitones, tempoMode);
+        setProcessingStep("Finalizing…");
         setTransposedFromBlob(blob);
         setAppliedSemitones(newSemitones);
         setPendingSemitones(null);
@@ -315,10 +306,12 @@ export default function useYouTubeTranspose({
         console.error("[YouTube] Transpose failed:", e);
       } finally {
         setIsProcessingYouTube(false);
+        setProcessingStep("");
       }
     },
     [
       youtubeUrl,
+      tempoMode,
       fetchYouTubeTransposed,
       addProcessedItem,
       setTransposedFromBlob,
@@ -343,6 +336,7 @@ export default function useYouTubeTranspose({
     setYoutubeKey,
     isProcessingYouTube,
     isAnalyzingKey,
+    processingStep,
     keyCacheRef,
     debounceRef,
     handleYouTube,

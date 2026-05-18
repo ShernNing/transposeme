@@ -1,12 +1,44 @@
 const express = require("express");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
+const execFileAsync = promisify(execFile);
+
+// Ensure system binaries and the correct Python are found by child processes.
+// Active venvs (e.g. from a different project opened in VSCode) hijack python3 in PATH;
+// strip the venv and promote Python framework / Homebrew paths to the front.
+{
+  const PRIORITY_PATHS = [
+    "/Library/Frameworks/Python.framework/Versions/3.13/bin",
+    "/Library/Frameworks/Python.framework/Versions/3.12/bin",
+    "/Library/Frameworks/Python.framework/Versions/3.11/bin",
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+  ];
+  const venvBin = process.env.VIRTUAL_ENV
+    ? `${process.env.VIRTUAL_ENV}/bin`
+    : null;
+  // Remove venv bin and any PRIORITY_PATHS from their current positions,
+  // then put PRIORITY_PATHS at the front so they always win.
+  const baseParts = (process.env.PATH || "")
+    .split(":")
+    .filter((p) => p !== venvBin && !PRIORITY_PATHS.includes(p) && p.length > 0);
+  process.env.PATH = [...PRIORITY_PATHS, ...baseParts].join(":");
+  delete process.env.VIRTUAL_ENV;
+  delete process.env.VIRTUAL_ENV_PROMPT;
+}
+
 // Dependency check helpers
 const REQUIRED_BINARIES = ["ffmpeg", "rubberband"];
 const REQUIRED_PYTHON = process.platform === "win32" ? "python" : "python3";
-const REQUIRED_PYTHON_MODULES = ["yt-dlp", "essentia"];
+// essentia is optional (youtube-key endpoint only) — not included here to avoid
+// arm64/x86_64 arch mismatch on Apple Silicon where essentia may be x86_64 compiled.
+const REQUIRED_PYTHON_MODULES = ["yt_dlp"];
 
 async function checkBinary(cmd) {
   try {
-    await execFileAsync(cmd, ["--version"]);
+    await execFileAsync("which", [cmd]);
     return true;
   } catch {
     return false;
@@ -57,12 +89,9 @@ async function printDependencyErrors(results) {
 })();
 const cors = require("cors");
 const helmet = require("helmet");
-const { execFile } = require("child_process");
 const fs = require("fs");
 const { v4: uuidv4 } = require("uuid");
 const path = require("path");
-const { promisify } = require("util");
-const execFileAsync = promisify(execFile);
 const REQUEST_WINDOW_MS = 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 20;
 const YT_TIMEOUT_MS = 120000;
@@ -72,6 +101,9 @@ const MAX_VIDEO_DURATION_SECONDS = 1200;
 const COOKIES_PATH = process.env.COOKIES_PATH || "/app/cookies.txt";
 const COOKIES_EXISTS = fs.existsSync(COOKIES_PATH);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
+if (CORS_ORIGIN === "*" && process.env.NODE_ENV === "production") {
+  console.warn("[startup] Warning: CORS_ORIGIN is wildcard (*) in production. Set CORS_ORIGIN env var to restrict access.");
+}
 const CACHE_MAX_SIZE = parseInt(process.env.MAX_CACHE_SIZE || "100", 10);
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
@@ -186,8 +218,80 @@ app.get("/", (_req, res) => {
       health: "/api/health",
       youtubeKey: "/api/youtube-key (POST)",
       youtubeTranspose: "/api/youtube-transpose (POST)",
+      fetchUrl: "/api/fetch-url (POST)",
     },
   });
+});
+
+const ALLOWED_CHORD_HOSTS = new Set([
+  "www.ultimate-guitar.com",
+  "tabs.ultimate-guitar.com",
+  "www.worshiptogether.com",
+  "worshiptogether.com",
+  "pnwchords.com",
+  "www.pnwchords.com",
+]);
+
+// POST /api/fetch-url
+// { url: string }
+// Proxy for chord sheet fetching — only allowed hosts above.
+app.post("/api/fetch-url", async (req, res) => {
+  const { url } = req.body;
+  if (!url || typeof url !== "string")
+    return res.status(400).json({ error: "Missing url" });
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return res.status(400).json({ error: "Invalid URL" });
+  }
+  if (!["http:", "https:"].includes(parsed.protocol))
+    return res.status(400).json({ error: "Only http/https URLs allowed" });
+  if (!ALLOWED_CHORD_HOSTS.has(parsed.hostname))
+    return res.status(403).json({ error: "Host not allowed" });
+
+  const mod = parsed.protocol === "https:" ? require("https") : require("http");
+  try {
+    const text = await new Promise((resolve, reject) => {
+      const request = mod.get(
+        url,
+        {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (compatible; TransposeMe/1.0; +https://transposeme.app)",
+            Accept: "text/html,application/xhtml+xml",
+          },
+          timeout: 15000,
+        },
+        (resp) => {
+          if (resp.statusCode !== 200) {
+            resp.resume();
+            return reject(new Error(`HTTP ${resp.statusCode}`));
+          }
+          let data = "";
+          resp.setEncoding("utf8");
+          resp.on("data", (chunk) => {
+            data += chunk;
+            if (data.length > 5 * 1024 * 1024) {
+              request.destroy();
+              reject(new Error("Response too large"));
+            }
+          });
+          resp.on("end", () => resolve(data));
+        },
+      );
+      request.on("error", reject);
+      request.on("timeout", () => {
+        request.destroy();
+        reject(new Error("Request timeout"));
+      });
+    });
+    res.type("text/plain").send(text);
+  } catch (e) {
+    res
+      .status(500)
+      .json({ error: "Fetch failed", details: e.message });
+  }
 });
 
 // Global error handlers
@@ -432,7 +536,7 @@ app.post("/api/youtube-key", async (req, res) => {
 // { url: string, semitones: number }
 app.post("/api/youtube-transpose", async (req, res) => {
   if (!enforceRateLimit(req, res)) return;
-  const { url, semitones = 0 } = req.body;
+  const { url, semitones = 0, tempoMode = false } = req.body;
   if (!url) return res.status(400).json({ error: "Missing YouTube URL" });
   if (!isValidYouTubeUrl(url))
     return res.status(400).json({
@@ -445,7 +549,8 @@ app.post("/api/youtube-transpose", async (req, res) => {
       .status(400)
       .json({ error: "Semitones must be between -12 and 12." });
   }
-  const cacheKey = `${url}::${semitoneNum}`;
+  const isTempo = tempoMode === true;
+  const cacheKey = `${url}::${semitoneNum}::${isTempo ? "t" : "p"}`;
   if (
     transposeCache.has(cacheKey) &&
     fs.existsSync(transposeCache.get(cacheKey))
@@ -521,18 +626,19 @@ app.post("/api/youtube-transpose", async (req, res) => {
         );
       });
 
-      if (semitoneNum !== 0) {
+      if (semitoneNum !== 0 || isTempo) {
+        const timeRatio = (1 / Math.pow(2, semitoneNum / 12)).toFixed(6);
+        const rbArgs = ["-3", "--formant"];
+        if (isTempo) {
+          rbArgs.push("-t", timeRatio);
+        } else {
+          rbArgs.push("-p", semitoneNum.toString());
+        }
+        rbArgs.push(audioPath, outPath);
         await new Promise((resolve, reject) => {
           execFile(
             "rubberband",
-            [
-              "-3",
-              "--formant",
-              "-p",
-              semitoneNum.toString(),
-              audioPath,
-              outPath,
-            ],
+            rbArgs,
             { timeout: RUBBERBAND_TIMEOUT_MS },
             (err, _stdout, stderr) => {
               if (err) return reject(new Error(stderr || err));

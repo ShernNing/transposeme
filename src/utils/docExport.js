@@ -31,18 +31,31 @@ export async function generateDocx({ title, key, chordText }) {
 // Generate a PDF file from plain text
 export async function generatePdf({ title, key, chordText }) {
   const pdfDoc = await PDFDocument.create();
-  const page = pdfDoc.addPage();
-  const { width, height } = page.getSize();
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  let y = height - 40;
-  page.drawText(title, { x: 40, y, size: 24, font, color: rgb(0,0,0) });
+  const margin = 40;
+  const lineHeight = 18;
+  const minY = margin;
+
+  const addPage = () => {
+    const p = pdfDoc.addPage();
+    return { page: p, y: p.getSize().height - margin };
+  };
+
+  let { page, y } = addPage();
+
+  page.drawText(title, { x: margin, y, size: 24, font, color: rgb(0, 0, 0) });
   y -= 32;
-  page.drawText(`Key: ${key}`, { x: 40, y, size: 16, font, color: rgb(0.2,0.2,0.2) });
+  page.drawText(`Key: ${key}`, { x: margin, y, size: 16, font, color: rgb(0.2, 0.2, 0.2) });
   y -= 28;
-  chordText.split("\n").forEach(line => {
-    page.drawText(line, { x: 40, y, size: 12, font, color: rgb(0,0,0) });
-    y -= 18;
-  });
+
+  for (const line of chordText.split("\n")) {
+    if (y < minY + lineHeight) {
+      ({ page, y } = addPage());
+    }
+    page.drawText(line, { x: margin, y, size: 12, font, color: rgb(0, 0, 0) });
+    y -= lineHeight;
+  }
+
   const pdfBytes = await pdfDoc.save();
   return new Blob([pdfBytes], { type: "application/pdf" });
 }

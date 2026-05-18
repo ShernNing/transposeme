@@ -1,5 +1,14 @@
 import React from 'react';
 
+const INTERVAL_NAMES = {
+  0: "Unison", 1: "Minor 2nd ↑", 2: "Major 2nd ↑", 3: "Minor 3rd ↑", 4: "Major 3rd ↑",
+  5: "Perfect 4th ↑", 6: "Tritone", 7: "Perfect 5th ↑", 8: "Minor 6th ↑", 9: "Major 6th ↑",
+  10: "Minor 7th ↑", 11: "Major 7th ↑", 12: "Octave ↑",
+  "-1": "Minor 2nd ↓", "-2": "Major 2nd ↓", "-3": "Minor 3rd ↓", "-4": "Major 3rd ↓",
+  "-5": "Perfect 4th ↓", "-6": "Tritone ↓", "-7": "Perfect 5th ↓", "-8": "Minor 6th ↓",
+  "-9": "Major 6th ↓", "-10": "Minor 7th ↓", "-11": "Major 7th ↓", "-12": "Octave ↓",
+};
+
 const TransposeControls = ({ value, min, max, onChange, onReset, disabled, tempoMode, onTempoModeChange }) => (
   <div style={{ margin: '16px 0', textAlign: 'center' }}>
     {/* Mode toggle */}
@@ -48,10 +57,10 @@ const TransposeControls = ({ value, min, max, onChange, onReset, disabled, tempo
     <button onClick={onReset} disabled={disabled || value === 0} style={{ marginLeft: 8 }}>
       Reset
     </button>
-    <span style={{ marginLeft: 12, color: '#fff' }}>
+    <span style={{ marginLeft: 12, color: '#fff', minWidth: 120, display: 'inline-block' }}>
       {tempoMode
         ? value === 0 ? '1× (original)' : `${Math.pow(2, value / 12).toFixed(2)}×`
-        : value}
+        : <>{value > 0 ? `+${value}` : value}<span style={{ color: '#718096', fontSize: 11, marginLeft: 7 }}>{INTERVAL_NAMES[String(value)] || ''}</span></>}
     </span>
   </div>
 );

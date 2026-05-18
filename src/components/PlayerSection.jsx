@@ -1,4 +1,9 @@
-import React, { useState, memo } from "react";
+import React, { memo } from "react";
+import { isAudio } from "../utils/audioUtils";
+import { isVideo } from "../utils/videoUtils";
+import { transposeDetectedKey } from "../utils/keyUtils";
+import AudioPlayer from "./AudioPlayer";
+import VideoPlayer from "./VideoPlayer";
 
 function formatDuration(seconds) {
   if (!isFinite(seconds)) return '';
@@ -24,33 +29,31 @@ function PlayerSection({
   processedItems = [],
   controlsDisabled = false,
   youtubeKey,
-  transposeDetectedKey,
   mediaRef,
-  ...audioVideoProps
+  showOriginal,
+  setShowOriginal,
 }) {
-  const { isAudio, isVideo } = audioVideoProps;
-  const [showOriginal, setShowOriginal] = useState(false);
 
   // Only show A/B toggle when we have both original and transposed and semitones ≠ 0
-  const canAB = originalSrc && transposedSrc && semitones !== 0;
+  const canAB = originalSrc && transposedSrc && appliedSemitones !== 0;
   const activeSrc = canAB && showOriginal ? originalSrc : transposedSrc;
 
   // Find metadata for current file/youtubeUrl
   let processedItem = null;
   if (file) {
     processedItem = processedItems.find(
-      (item) => item.fileName === file.name && Number(item.semitones) === Number(semitones)
+      (item) => item.fileName === file.name && Number(item.semitones) === Number(appliedSemitones)
     );
   } else if (youtubeUrl) {
     processedItem = processedItems.find(
-      (item) => item.youtubeUrl === youtubeUrl && Number(item.semitones) === Number(semitones)
+      (item) => item.youtubeUrl === youtubeUrl && Number(item.semitones) === Number(appliedSemitones)
     );
   }
   const title = processedItem?.title || processedItem?.fileName || processedItem?.label || '';
   const meta = processedItem?.metadata;
   const originalKey = meta?.key || youtubeKey || "";
-  const currentKey = originalKey && typeof transposeDetectedKey === 'function'
-    ? transposeDetectedKey(originalKey, semitones)
+  const transposedKey = originalKey && typeof transposeDetectedKey === 'function'
+    ? transposeDetectedKey(originalKey, appliedSemitones)
     : "";
 
   const metaString = meta
@@ -62,82 +65,119 @@ function PlayerSection({
       ].filter(Boolean).join(' • ')
     : '';
 
-  function labelWithKey(base, key) {
-    return key ? `${base}  |  Key: ${key}` : base;
-  }
+  const semLabel = appliedSemitones !== 0
+    ? `${appliedSemitones > 0 ? "+" : ""}${appliedSemitones} semitone${Math.abs(appliedSemitones) === 1 ? "" : "s"}`
+    : "original";
 
-  const semLabel = semitones !== 0
-    ? `Transposed: ${semitones > 0 ? "+" : ""}${semitones} semitone${Math.abs(semitones) === 1 ? "" : "s"}`
-    : "Original playback";
-
-  const baseLabel = (title ? `${title}  |  ` : '') + semLabel + (metaString ? `  |  ${metaString}` : '');
+  const activeKey = canAB && showOriginal ? originalKey : transposedKey;
+  const baseLabel = [
+    title || null,
+    appliedSemitones !== 0
+      ? (canAB && showOriginal ? "Original pitch" : `Transposed ${semLabel}`)
+      : "Original playback",
+    activeKey ? `Key: ${activeKey}` : null,
+    metaString || null,
+  ].filter(Boolean).join("  |  ");
 
   const ABToggle = canAB ? (
-    <div style={{ textAlign: "center", margin: "6px 0" }}>
-      <button
-        onClick={() => setShowOriginal((v) => !v)}
-        style={{
-          background: showOriginal ? "#2b4360" : "#22543d",
-          color: showOriginal ? "#90cdf4" : "#9ae6b4",
-          border: "none",
-          borderRadius: 6,
-          padding: "5px 16px",
-          fontWeight: 700,
-          fontSize: 13,
-          cursor: "pointer",
-        }}
-        title="Toggle between original and transposed audio"
-      >
-        {showOriginal ? "🔁 Hearing: Original — click for Transposed" : "🔁 Hearing: Transposed — click for Original"}
-      </button>
+    <div style={{ display: "flex", justifyContent: "center", margin: "10px 0 6px", gap: 0 }}>
+      <div style={{
+        display: "inline-flex",
+        borderRadius: 8,
+        border: "1px solid rgba(255,255,255,0.1)",
+        background: "#1a1f2e",
+      }}>
+        {/* Original tab */}
+        <button
+          onClick={() => setShowOriginal(true)}
+          className="ab-toggle-btn"
+          style={{
+            padding: "7px 18px",
+            border: "none",
+            borderRight: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: "7px 0 0 7px",
+            background: showOriginal ? "#1a2e48" : "transparent",
+            color: showOriginal ? "#90cdf4" : "#718096",
+            fontWeight: showOriginal ? 700 : 400,
+            fontSize: 13,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            transition: "background 150ms, color 150ms",
+          }}
+          title="Listen to the original pitch"
+        >
+          {showOriginal && (
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#90cdf4", display: "inline-block", flexShrink: 0 }} />
+          )}
+          <span>
+            <span style={{ fontSize: 10, opacity: 0.7, display: "block", lineHeight: 1, marginBottom: 1 }}>ORIGINAL</span>
+            <span>{originalKey || "Original"}</span>
+          </span>
+        </button>
+
+        {/* Transposed tab */}
+        <button
+          onClick={() => setShowOriginal(false)}
+          className="ab-toggle-btn"
+          style={{
+            padding: "7px 18px",
+            border: "none",
+            borderRadius: "0 7px 7px 0",
+            background: !showOriginal ? "#1a3d2b" : "transparent",
+            color: !showOriginal ? "#9ae6b4" : "#718096",
+            fontWeight: !showOriginal ? 700 : 400,
+            fontSize: 13,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            transition: "background 150ms, color 150ms",
+          }}
+          title="Listen to the transposed pitch"
+        >
+          {!showOriginal && (
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#9ae6b4", display: "inline-block", flexShrink: 0 }} />
+          )}
+          <span>
+            <span style={{ fontSize: 10, opacity: 0.7, display: "block", lineHeight: 1, marginBottom: 1 }}>TRANSPOSED {semLabel}</span>
+            <span>{transposedKey || "Transposed"}</span>
+          </span>
+        </button>
+      </div>
     </div>
   ) : null;
+
+  const playerProps = {
+    ref: mediaRef,
+    src: activeSrc,
+    playing,
+    onPlay: () => setPlaying(true),
+    onPause: () => setPlaying(false),
+    disabled: controlsDisabled,
+    seekTo,
+    label: baseLabel,
+  };
 
   return (
     <>
       {file && isAudio(file) && (
         <>
           {ABToggle}
-          <audioVideoProps.AudioPlayer
-            ref={mediaRef}
-            src={activeSrc}
-            playing={playing}
-            onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
-            disabled={controlsDisabled}
-            seekTo={seekTo}
-            label={labelWithKey(canAB && showOriginal ? (title ? `${title}  |  Original` : "Original") : baseLabel, canAB && showOriginal ? originalKey : currentKey)}
-          />
+          <AudioPlayer {...playerProps} />
         </>
       )}
       {file && isVideo(file) && (
         <>
           {ABToggle}
-          <audioVideoProps.VideoPlayer
-            ref={mediaRef}
-            src={activeSrc}
-            playing={playing}
-            onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
-            disabled={controlsDisabled}
-            seekTo={seekTo}
-            label={labelWithKey(canAB && showOriginal ? (title ? `${title}  |  Original` : "Original") : baseLabel, canAB && showOriginal ? originalKey : currentKey)}
-          />
+          <VideoPlayer {...playerProps} />
         </>
       )}
       {youtubeUrl && transposedSrc && (
         <>
           {ABToggle}
-          <audioVideoProps.AudioPlayer
-            ref={mediaRef}
-            src={activeSrc}
-            playing={playing}
-            onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
-            disabled={controlsDisabled}
-            seekTo={seekTo}
-            label={labelWithKey(canAB && showOriginal ? (title ? `${title}  |  Original` : "Original") : baseLabel, canAB && showOriginal ? originalKey : currentKey)}
-          />
+          <AudioPlayer {...playerProps} />
         </>
       )}
     </>

@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat /Users/shernningtan/Documents/Codes/Code/transposeme/node_modules/rubberband-wasm/demo/*.js)",
+      "Bash(cat /Users/shernningtan/Documents/Codes/Code/transposeme/node_modules/rubberband-wasm/demo/*.html)",
+      "Bash(npx vite:*)",
+      "Bash(node --input-type=module)",
+      "Bash(node server/index.cjs)",
+      "Bash(brew list *)",
+      "Bash(python3 -c \"import yt-dlp\")",
+      "Bash(python3 -c \"import yt_dlp\")",
+      "Bash(python3 -c \"import essentia\")",
+      "Bash(timeout 5 node index.cjs)",
+      "Bash(node -e ' *)",
+      "Bash(VIRTUAL_ENV=/some/other/project/.venv VIRTUAL_ENV_PROMPT='\\(.venv\\)' PATH=/some/other/project/.venv/bin:__TRACKED_VAR__ timeout 6 node index.cjs)",
+      "Bash(VIRTUAL_ENV='/Users/shernningtan/Documents/Codes/transpose/transpose application/.venv' VIRTUAL_ENV_PROMPT='\\(.venv\\) ' PATH='/Users/shernningtan/Documents/Codes/transpose/transpose application/.venv/bin:__TRACKED_VAR__' timeout 6 node index.cjs)",
+      "Bash(VIRTUAL_ENV='/Users/shernningtan/Documents/Codes/transpose/transpose application/.venv' VIRTUAL_ENV_PROMPT='\\(.venv\\) ' PATH='/Users/shernningtan/Documents/Codes/transpose/transpose application/.venv/bin:__TRACKED_VAR__' timeout 8 node -e ' *)",
+      "Bash(/Library/Frameworks/Python.framework/Versions/3.12/bin/python3 -c \"import essentia\")",
+      "Bash(echo \"exit: $?\")",
+      "Bash(VIRTUAL_ENV='/Users/shernningtan/Documents/Codes/transpose/transpose application/.venv' VIRTUAL_ENV_PROMPT='\\(.venv\\) ' PATH='/Users/shernningtan/Documents/Codes/transpose/transpose application/.venv/bin:__TRACKED_VAR__' timeout 8 node index.cjs)",
+      "Bash(VIRTUAL_ENV='/Users/shernningtan/Documents/Codes/transpose/transpose application/.venv' PATH='/Users/shernningtan/Documents/Codes/transpose/transpose application/.venv/bin:__TRACKED_VAR__' /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 -c 'import essentia')",
+      "Read(//Applications/Python 3.12/**)",
+      "Read(//Applications/**)",
+      "Bash(lsof -ti:5173)",
+      "mcp__Claude_in_Chrome__navigate",
+      "mcp__Claude_in_Chrome__computer",
+      "mcp__Claude_in_Chrome__get_page_text",
+      "Bash(open -a \"Google Chrome\" \"http://localhost:5173\")",
+      "Bash(open \"http://localhost:5173\")",
+      "mcp__Claude_in_Chrome__list_connected_browsers",
+      "Bash(npm run *)"
+    ]
+  }
+}

@@ -16,7 +16,7 @@ export default function ProcessedHistory({ processedItems, onLoad, onDelete, onC
   const [typeFilter, setTypeFilter] = useState("all");
   const [hoveredId, setHoveredId] = useState(null);
   const [lastDeleted, setLastDeleted] = useState(null);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const importRef = useRef();
 
   const handleExport = () => {
@@ -93,7 +93,8 @@ export default function ProcessedHistory({ processedItems, onLoad, onDelete, onC
     if (onClear) onClear();
   };
 
-  if (!filteredItems || filteredItems.length === 0) return null;
+  const hasItems = filteredItems && filteredItems.length > 0;
+  if (!hasItems && !processedItems.length) return null;
 
   return (
     <div style={{ margin: "12px 0 18px", padding: 0, background: "#23272f", borderRadius: 12, boxShadow: "0 2px 12px #0002", border: "1px solid #23272f", minHeight: 80 }}>
@@ -105,8 +106,8 @@ export default function ProcessedHistory({ processedItems, onLoad, onDelete, onC
           title={collapsed ? "Expand history" : "Collapse history"}
         >
           <span style={{ fontSize: 10, display: "inline-block", transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>▼</span>
-          Processed History
-          <span style={{ color: "#4a5568", fontSize: 12, fontWeight: 400 }}>({filteredItems.length})</span>
+          History
+          {hasItems && <span style={{ color: "#4a5568", fontSize: 12, fontWeight: 400 }}>({filteredItems.length})</span>}
         </button>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {lastDeleted && (
