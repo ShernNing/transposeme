@@ -1,4 +1,10 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
 import { transposeAudioBuffer } from "./utils/wasmTransposer";
 import FileUpload from "./components/FileUpload";
 import YouTubeInput from "./components/YouTubeInput";
@@ -76,14 +82,20 @@ function App() {
 
   // --- Helpers ---
   const setTransposedFromBlob = useCallback((blob) => {
-    if (!blob) { setTransposedSrc(null); return; }
+    if (!blob) {
+      setTransposedSrc(null);
+      return;
+    }
     setTransposedSrc((prev) => {
       if (prev) URL.revokeObjectURL(prev);
       return URL.createObjectURL(blob);
     });
   }, []);
 
-  const showNotice = useCallback((type, message) => setNotice({ type, message }), []);
+  const showNotice = useCallback(
+    (type, message) => setNotice({ type, message }),
+    [],
+  );
 
   const readFileArrayBuffer = useCallback(async (f) => {
     if (fileBufferRef.current.file === f && fileBufferRef.current.buffer) {
@@ -142,12 +154,19 @@ function App() {
     const savedUseWasm = localStorage.getItem("transpose_useWasm");
     const savedFormat = localStorage.getItem("transpose_outputFormat");
     if (savedUseWasm != null) setUseWasm(savedUseWasm === "true");
-    if (savedFormat && OUTPUT_FORMATS.includes(savedFormat)) setOutputFormat(savedFormat);
+    if (savedFormat && OUTPUT_FORMATS.includes(savedFormat))
+      setOutputFormat(savedFormat);
   }, []);
 
-  useEffect(() => { localStorage.setItem("transpose_useWasm", String(useWasm)); }, [useWasm]);
-  useEffect(() => { localStorage.setItem("transpose_outputFormat", outputFormat); }, [outputFormat]);
-  useEffect(() => { setShowOriginalAB(false); }, [appliedSemitones]);
+  useEffect(() => {
+    localStorage.setItem("transpose_useWasm", String(useWasm));
+  }, [useWasm]);
+  useEffect(() => {
+    localStorage.setItem("transpose_outputFormat", outputFormat);
+  }, [outputFormat]);
+  useEffect(() => {
+    setShowOriginalAB(false);
+  }, [appliedSemitones]);
 
   useEffect(() => {
     if (!notice) return;
@@ -162,14 +181,22 @@ function App() {
       if (ytProgressRef.current > 0) {
         ytProgressRef.current = 100;
         setYtProgress(100);
-        const t = setTimeout(() => { ytProgressRef.current = 0; setYtProgress(0); }, 600);
+        const t = setTimeout(() => {
+          ytProgressRef.current = 0;
+          setYtProgress(0);
+        }, 600);
         return () => clearTimeout(t);
       }
       return;
     }
     const getRange = (step) => {
       if (!step) return [5, 44];
-      if (step.includes("1/3") || step.includes("Downloading") || step.includes("Applying")) return [5, 44];
+      if (
+        step.includes("1/3") ||
+        step.includes("Downloading") ||
+        step.includes("Applying")
+      )
+        return [5, 44];
       if (step.includes("2/3") || step.includes("Extracting")) return [48, 64];
       if (step.includes("3/3") || step.includes("Detecting")) return [68, 88];
       if (step.includes("Finalizing")) return [88, 94];
@@ -188,7 +215,7 @@ function App() {
       }
     }, 500);
     return () => clearInterval(ytTickRef.current);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isProcessingYouTube, processingStep]);
 
   // --- Cleanup on unmount ---
@@ -199,156 +226,250 @@ function App() {
       if (audioCtxRef.current?.state !== "closed") audioCtxRef.current?.close();
       releaseFFmpeg();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // --- Shared WASM transpose logic ---
-  const runWasmTranspose = useCallback(async (f, newSemitones) => {
-    setWasmProgress(5);
-    const rawBuf = await readFileArrayBuffer(f);
-    setWasmProgress(25);
-    const audioBuffer = await (await getAudioContext()).decodeAudioData(rawBuf.slice(0));
-    setWasmProgress(55);
-    const transposedBuffer = await transposeAudioBuffer(
-      audioBuffer,
-      tempoMode ? 0 : newSemitones,
-      tempoMode ? { timeRatio: 1 / Math.pow(2, newSemitones / 12) } : {}
-    );
-    setWasmProgress(90);
-    const wavBlob = await audioBufferToWavBlob(transposedBuffer);
-    setWasmProgress(100);
-    return isVideo(f) ? remuxVideoWithAudio(f, wavBlob) : wavBlob;
-  }, [getAudioContext, readFileArrayBuffer, tempoMode]);
+  const runWasmTranspose = useCallback(
+    async (f, newSemitones) => {
+      setWasmProgress(5);
+      const rawBuf = await readFileArrayBuffer(f);
+      setWasmProgress(25);
+      const audioBuffer = await (
+        await getAudioContext()
+      ).decodeAudioData(rawBuf.slice(0));
+      setWasmProgress(55);
+      const transposedBuffer = await transposeAudioBuffer(
+        audioBuffer,
+        tempoMode ? 0 : newSemitones,
+        tempoMode ? { timeRatio: 1 / Math.pow(2, newSemitones / 12) } : {},
+      );
+      setWasmProgress(90);
+      const wavBlob = await audioBufferToWavBlob(transposedBuffer);
+      setWasmProgress(100);
+      return isVideo(f) ? remuxVideoWithAudio(f, wavBlob) : wavBlob;
+    },
+    [getAudioContext, readFileArrayBuffer, tempoMode],
+  );
 
-  const analyzeFileKey = useCallback(async (audioBlob, filename) => {
-    if (!audioBlob) return;
-    setIsAnalyzingFileKey(true);
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/detect-key`, {
-        method: "POST",
-        headers: { "Content-Type": "application/octet-stream", "X-Filename": (filename || "audio.wav") },
-        body: await audioBlob.arrayBuffer(),
-      });
-      if (!response.ok) throw new Error(await response.text());
-      const data = await response.json();
-      setFileKey(data.key || "Unknown");
-    } catch {
-      setFileKey("");
-    } finally {
-      setIsAnalyzingFileKey(false);
-    }
-  }, [API_BASE_URL]);
+  const analyzeFileKey = useCallback(
+    async (audioBlob, filename) => {
+      if (!audioBlob) return;
+      setIsAnalyzingFileKey(true);
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/detect-key`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "X-Filename": filename || "audio.wav",
+          },
+          body: await audioBlob.arrayBuffer(),
+        });
+        if (!response.ok) throw new Error(await response.text());
+        const data = await response.json();
+        setFileKey(data.key || "Unknown");
+      } catch {
+        setFileKey("");
+      } finally {
+        setIsAnalyzingFileKey(false);
+      }
+    },
+    [API_BASE_URL],
+  );
 
   // --- Handler: File upload ---
-  const handleFileSelect = useCallback(async (f) => {
-    setAppError("");
-    fileBufferRef.current = { file: null, buffer: null };
-    setFile(f);
-    setYoutubeUrl("");
-    setShowOriginalYouTube(true);
-    setYoutubeKey("");
-    setFileKey("");
-    setSemitones(0);
-    setPendingSemitones(null);
-    setAppliedSemitones(0);
-    setTransposedSrc(null);
-    setOriginalSrc(null);
-    if (!f) return;
-    try {
-      if (useWasm && (isAudio(f) || isVideo(f))) {
-        let blob;
-        try {
-          blob = await runWasmTranspose(f, 0);
-        } catch (e) {
-          setWasmProgress(0);
-          if (isVideo(f)) { setAppError("Video remuxing failed. " + (e.message || "")); return; }
-          throw e;
-        }
-        setTimeout(() => setWasmProgress(0), 500);
-        setTransposedFromBlob(blob);
-        setOriginalSrc(URL.createObjectURL(blob));
-        setAppliedSemitones(0);
-        setPlaying(true);
-        const meta = await extractMetadata(blob, isVideo(f) ? "video" : "audio");
-        addProcessedItem({ id: `${f.name}::0`, type: isVideo(f) ? "video" : "audio", label: f.name, title: f.name, blob, semitones: 0, isYouTube: false, fileName: f.name, metadata: meta });
-        analyzeFileKey(blob, f.name.replace(/\.[^.]+$/, "") + ".wav");
-      } else {
-        const result = await transpose(f, 0, isAudio(f) ? "audio" : "video");
-        if (result) {
-          setTransposedFromBlob(result);
+  const handleFileSelect = useCallback(
+    async (f) => {
+      setAppError("");
+      fileBufferRef.current = { file: null, buffer: null };
+      setFile(f);
+      setYoutubeUrl("");
+      setShowOriginalYouTube(true);
+      setYoutubeKey("");
+      setFileKey("");
+      setSemitones(0);
+      setPendingSemitones(null);
+      setAppliedSemitones(0);
+      setTransposedSrc(null);
+      setOriginalSrc(null);
+      if (!f) return;
+      try {
+        if (useWasm && (isAudio(f) || isVideo(f))) {
+          let blob;
+          try {
+            blob = await runWasmTranspose(f, 0);
+          } catch (e) {
+            setWasmProgress(0);
+            if (isVideo(f)) {
+              setAppError("Video remuxing failed. " + (e.message || ""));
+              return;
+            }
+            throw e;
+          }
+          setTimeout(() => setWasmProgress(0), 500);
+          setTransposedFromBlob(blob);
+          setOriginalSrc(URL.createObjectURL(blob));
           setAppliedSemitones(0);
           setPlaying(true);
-          const meta = await extractMetadata(result, isAudio(f) ? "audio" : "video");
-          addProcessedItem({ id: `${f.name}::0`, type: isAudio(f) ? "audio" : "video", label: f.name, title: f.name, blob: result, semitones: 0, isYouTube: false, fileName: f.name, metadata: meta });
-          analyzeFileKey(result, f.name.replace(/\.[^.]+$/, "") + ".wav");
+          const meta = await extractMetadata(
+            blob,
+            isVideo(f) ? "video" : "audio",
+          );
+          addProcessedItem({
+            id: `${f.name}::0`,
+            type: isVideo(f) ? "video" : "audio",
+            label: f.name,
+            title: f.name,
+            blob,
+            semitones: 0,
+            isYouTube: false,
+            fileName: f.name,
+            metadata: meta,
+          });
+          analyzeFileKey(blob, f.name.replace(/\.[^.]+$/, "") + ".wav");
+        } else {
+          const result = await transpose(f, 0, isAudio(f) ? "audio" : "video");
+          if (result) {
+            setTransposedFromBlob(result);
+            setAppliedSemitones(0);
+            setPlaying(true);
+            const meta = await extractMetadata(
+              result,
+              isAudio(f) ? "audio" : "video",
+            );
+            addProcessedItem({
+              id: `${f.name}::0`,
+              type: isAudio(f) ? "audio" : "video",
+              label: f.name,
+              title: f.name,
+              blob: result,
+              semitones: 0,
+              isYouTube: false,
+              fileName: f.name,
+              metadata: meta,
+            });
+            analyzeFileKey(result, f.name.replace(/\.[^.]+$/, "") + ".wav");
+          }
         }
+      } catch (e) {
+        setWasmProgress(0);
+        setTransposedSrc(null);
+        setAppError(
+          "File processing failed. Please check your file and try again. " +
+            (e?.message || "Unknown error"),
+        );
       }
-    } catch (e) {
-      setWasmProgress(0);
-      setTransposedSrc(null);
-      setAppError("File processing failed. Please check your file and try again. " + (e?.message || "Unknown error"));
-    }
-  }, [useWasm, runWasmTranspose, transpose, setTransposedFromBlob, setFile, setYoutubeUrl, setYoutubeKey, addProcessedItem, analyzeFileKey]);
+    },
+    [
+      useWasm,
+      runWasmTranspose,
+      transpose,
+      setTransposedFromBlob,
+      setFile,
+      setYoutubeUrl,
+      setYoutubeKey,
+      addProcessedItem,
+      analyzeFileKey,
+    ],
+  );
 
   // --- Handler: Real-time transposition ---
-  const runTranspose = useCallback(async (newSemitones) => {
-    setAppError("");
-    const currentTime = playerRef.current?.currentTime ?? 0;
+  const runTranspose = useCallback(
+    async (newSemitones) => {
+      setAppError("");
+      const currentTime = playerRef.current?.currentTime ?? 0;
 
-    if (youtubeUrl) {
-      await runYouTubeTranspose(newSemitones, { currentTime, setSeekTo });
-      return;
-    }
-    if (!file) { setAppError("Choose a file or YouTube link first."); return; }
-    try {
-      if (useWasm && (isAudio(file) || isVideo(file))) {
-        const blob = await runWasmTranspose(file, newSemitones);
-        setTimeout(() => setWasmProgress(0), 500);
-        setTransposedFromBlob(blob);
-        setAppliedSemitones(newSemitones);
-        setPendingSemitones(null);
-        setQueuedDelta(0);
-        setSeekTo(currentTime);
-        setPlaying(true);
-      } else {
-        const result = await transpose(file, newSemitones, isAudio(file) ? "audio" : "video");
-        if (result) {
-          setTransposedFromBlob(result);
+      if (youtubeUrl) {
+        await runYouTubeTranspose(newSemitones, { currentTime, setSeekTo });
+        return;
+      }
+      if (!file) {
+        setAppError("Choose a file or YouTube link first.");
+        return;
+      }
+      try {
+        if (useWasm && (isAudio(file) || isVideo(file))) {
+          const blob = await runWasmTranspose(file, newSemitones);
+          setTimeout(() => setWasmProgress(0), 500);
+          setTransposedFromBlob(blob);
           setAppliedSemitones(newSemitones);
           setPendingSemitones(null);
           setQueuedDelta(0);
           setSeekTo(currentTime);
           setPlaying(true);
+        } else {
+          const result = await transpose(
+            file,
+            newSemitones,
+            isAudio(file) ? "audio" : "video",
+          );
+          if (result) {
+            setTransposedFromBlob(result);
+            setAppliedSemitones(newSemitones);
+            setPendingSemitones(null);
+            setQueuedDelta(0);
+            setSeekTo(currentTime);
+            setPlaying(true);
+          }
         }
+      } catch (e) {
+        setWasmProgress(0);
+        setTransposedSrc(null);
+        setAppError("Transposition failed: " + (e?.message || "Unknown error"));
       }
-    } catch (e) {
-      setWasmProgress(0);
-      setTransposedSrc(null);
-      setAppError("Transposition failed: " + (e?.message || "Unknown error"));
-    }
-  }, [youtubeUrl, file, useWasm, runWasmTranspose, transpose, runYouTubeTranspose, setTransposedFromBlob]);
+    },
+    [
+      youtubeUrl,
+      file,
+      useWasm,
+      runWasmTranspose,
+      transpose,
+      runYouTubeTranspose,
+      setTransposedFromBlob,
+    ],
+  );
 
   // --- Handler: Transpose value change ---
-  const handleTranspose = useCallback((newSemitones) => {
-    setSemitones(newSemitones);
-    setPendingSemitones(newSemitones);
-    setQueuedDelta(newSemitones - appliedSemitones);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (youtubeUrl && !isProcessingYouTube) {
-      debounceRef.current = setTimeout(() => runTranspose(newSemitones), CONFIG.TRANSPOSE_DEBOUNCE_MS);
-      return;
-    }
-    if (!isProcessingYouTube) runTranspose(newSemitones);
-  }, [appliedSemitones, youtubeUrl, isProcessingYouTube, debounceRef, runTranspose]);
+  const handleTranspose = useCallback(
+    (newSemitones) => {
+      setSemitones(newSemitones);
+      setPendingSemitones(newSemitones);
+      setQueuedDelta(newSemitones - appliedSemitones);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (youtubeUrl && !isProcessingYouTube) {
+        debounceRef.current = setTimeout(
+          () => runTranspose(newSemitones),
+          CONFIG.TRANSPOSE_DEBOUNCE_MS,
+        );
+        return;
+      }
+      if (!isProcessingYouTube) runTranspose(newSemitones);
+    },
+    [
+      appliedSemitones,
+      youtubeUrl,
+      isProcessingYouTube,
+      debounceRef,
+      runTranspose,
+    ],
+  );
 
-  const handleResetTranspose = useCallback(() => handleTranspose(0), [handleTranspose]);
+  const handleResetTranspose = useCallback(
+    () => handleTranspose(0),
+    [handleTranspose],
+  );
 
   // --- Arrow key shortcut ---
   useEffect(() => {
     if (!file && !youtubeUrl) return;
     const onKeyDown = (e) => {
       if (processing || isProcessingYouTube) return;
-      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return;
+      if (
+        e.target.tagName === "INPUT" ||
+        e.target.tagName === "TEXTAREA" ||
+        e.target.isContentEditable
+      )
+        return;
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         const next = Math.max(CONFIG.SEMITONE_MIN, semitones - 1);
@@ -361,47 +482,71 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [file, youtubeUrl, semitones, processing, isProcessingYouTube, handleTranspose]);
+  }, [
+    file,
+    youtubeUrl,
+    semitones,
+    processing,
+    isProcessingYouTube,
+    handleTranspose,
+  ]);
 
   // --- Handler: Load from history ---
-  const handleLoadProcessed = useCallback((item) => {
-    if (item.blob) {
-      setTransposedSrc((prev) => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(item.blob); });
-    } else {
-      setTransposedSrc(item.src);
-    }
-    setSemitones(item.semitones);
-    setAppliedSemitones(item.semitones);
-    setPendingSemitones(null);
-    if (item.isYouTube) {
-      setYoutubeUrl(item.youtubeUrl);
-      setFile(null);
-      setShowOriginalYouTube(false);
-      if (item.metadata?.key) {
-        setYoutubeKey(item.metadata.key);
+  const handleLoadProcessed = useCallback(
+    (item) => {
+      if (item.blob) {
+        setTransposedSrc((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return URL.createObjectURL(item.blob);
+        });
       } else {
-        setYoutubeKey("");
-        setTimeout(() => handleAnalyzeKey(item.youtubeUrl), 1000);
+        setTransposedSrc(item.src);
       }
-    } else {
-      setFile(null);
-      setYoutubeUrl("");
-      setShowOriginalYouTube(true);
-      setYoutubeKey("");
-    }
-    setTimeout(() => setPlaying(true), 0);
-    showNotice("success", `Loaded from history: ${item.label}`);
-  }, [handleAnalyzeKey, showNotice, setFile, setYoutubeUrl, setYoutubeKey]);
+      setSemitones(item.semitones);
+      setAppliedSemitones(item.semitones);
+      setPendingSemitones(null);
+      if (item.isYouTube) {
+        setYoutubeUrl(item.youtubeUrl);
+        setFile(null);
+        setShowOriginalYouTube(false);
+        if (item.metadata?.key) {
+          setYoutubeKey(item.metadata.key);
+        } else {
+          setYoutubeKey("");
+          setTimeout(() => handleAnalyzeKey(item.youtubeUrl), 1000);
+        }
+      } else {
+        setFile(null);
+        setYoutubeUrl("");
+        setShowOriginalYouTube(true);
+        setYoutubeKey("");
+      }
+      setTimeout(() => setPlaying(true), 0);
+      showNotice("success", `Loaded from history: ${item.label}`);
+    },
+    [handleAnalyzeKey, showNotice, setFile, setYoutubeUrl, setYoutubeKey],
+  );
 
   // --- Download / Share ---
   const handleDownload = useCallback(() => {
-    if (!transposedSrc) { setAppError("No transposed output to download yet."); return; }
+    if (!transposedSrc) {
+      setAppError("No transposed output to download yet.");
+      return;
+    }
     const rawTitle =
-      processedItems.find(i => i.youtubeUrl === youtubeUrl && Number(i.semitones) === 0)?.title ||
+      processedItems.find(
+        (i) => i.youtubeUrl === youtubeUrl && Number(i.semitones) === 0,
+      )?.title ||
       file?.name?.replace(/\.[^.]+$/, "") ||
       "transposed";
-    const safeName = rawTitle.replace(/[^a-z0-9_\-]/gi, "_").replace(/_+/g, "_").slice(0, 48);
-    const stLabel = appliedSemitones !== 0 ? `_${appliedSemitones > 0 ? "+" : ""}${appliedSemitones}st` : "";
+    const safeName = rawTitle
+      .replace(/[^a-z0-9_\-]/gi, "_")
+      .replace(/_+/g, "_")
+      .slice(0, 48);
+    const stLabel =
+      appliedSemitones !== 0
+        ? `_${appliedSemitones > 0 ? "+" : ""}${appliedSemitones}st`
+        : "";
     const fileName = `${safeName}${stLabel}.${outputFormat}`;
     const a = document.createElement("a");
     a.href = transposedSrc;
@@ -410,7 +555,15 @@ function App() {
     a.click();
     a.remove();
     showNotice("success", `Downloaded ${fileName}`);
-  }, [transposedSrc, processedItems, youtubeUrl, file, appliedSemitones, outputFormat, showNotice]);
+  }, [
+    transposedSrc,
+    processedItems,
+    youtubeUrl,
+    file,
+    appliedSemitones,
+    outputFormat,
+    showNotice,
+  ]);
 
   const handleShare = useCallback(() => {
     if (navigator.share && transposedSrc) {
@@ -424,34 +577,62 @@ function App() {
   // --- Key display ---
   const activeKey = youtubeUrl ? youtubeKey : fileKey;
   const originalKeyLabel = activeKey || "Unknown";
-  const currentKeyLabel = activeKey ? transposeDetectedKey(activeKey, appliedSemitones) : "Unknown";
+  const currentKeyLabel = activeKey
+    ? transposeDetectedKey(activeKey, appliedSemitones)
+    : "Unknown";
 
   const keyFeedback = useMemo(() => {
     if (isAnalyzingKey || isAnalyzingFileKey) {
-      return <span style={{ color: "#f6e05e" }}>Analyzing key from audio...</span>;
+      return (
+        <span style={{ color: "#f6e05e" }}>Analyzing key from audio...</span>
+      );
     }
     if ((isProcessingYouTube || processing) && pendingSemitones !== null) {
       const feedbackText = `Applying ${formatSemitoneLabel(pendingSemitones)}${processingDots}`;
-      const queuedText = queuedDelta !== 0 ? `Queued: ${queuedDelta > 0 ? "+" : ""}${queuedDelta} (latest)` : null;
+      const queuedText =
+        queuedDelta !== 0
+          ? `Queued: ${queuedDelta > 0 ? "+" : ""}${queuedDelta} (latest)`
+          : null;
       return (
         <>
           <div style={{ color: "#f6e05e" }}>{feedbackText}</div>
-          {queuedText && <div style={{ color: "#90cdf4", fontSize: 12, marginTop: 2 }}>{queuedText}</div>}
+          {queuedText && (
+            <div style={{ color: "#90cdf4", fontSize: 12, marginTop: 2 }}>
+              {queuedText}
+            </div>
+          )}
         </>
       );
     }
     if (activeKey) {
-      return <span style={{ color: "#9ae6b4" }}>Applied {formatSemitoneLabel(appliedSemitones)}</span>;
+      return (
+        <span style={{ color: "#9ae6b4" }}>
+          Applied {formatSemitoneLabel(appliedSemitones)}
+        </span>
+      );
     }
     return <span style={{ color: "#9ae6b4" }}>Key not analyzed yet.</span>;
-  }, [isAnalyzingKey, isAnalyzingFileKey, isProcessingYouTube, processing, pendingSemitones, processingDots, queuedDelta, activeKey, appliedSemitones]);
+  }, [
+    isAnalyzingKey,
+    isAnalyzingFileKey,
+    isProcessingYouTube,
+    processing,
+    pendingSemitones,
+    processingDots,
+    queuedDelta,
+    activeKey,
+    appliedSemitones,
+  ]);
 
   return (
-    <div className="App">
-      <main className="app-shell">
-        <h1 className="app-title">TransposeMe</h1>
-        <p className="app-subtitle">Shift pitch &amp; tempo of YouTube videos and audio files — locally, instantly.</p>
-        <div className="app-card">
+    <div className='App'>
+      <main className='app-shell'>
+        <h1 className='app-title'>TransposeMe</h1>
+        <p className='app-subtitle'>
+          Shift pitch &amp; tempo of YouTube videos and audio files — locally,
+          instantly.
+        </p>
+        <div className='app-card'>
           <ProcessedHistory
             processedItems={processedItems}
             onLoad={handleLoadProcessed}
@@ -461,28 +642,46 @@ function App() {
           />
 
           {!file && !youtubeUrl && (
-            <div className="empty-state">
-              <div className="empty-state-steps">
-                <div className="empty-state-step"><span className="empty-state-num">1</span>Paste a YouTube link or upload an audio/video file</div>
-                <div className="empty-state-step"><span className="empty-state-num">2</span>Drag the slider or pick a target key</div>
-                <div className="empty-state-step"><span className="empty-state-num">3</span>Download the transposed file</div>
+            <div className='empty-state'>
+              <div className='empty-state-steps'>
+                <div className='empty-state-step'>
+                  <span className='empty-state-num'>1</span>Paste a YouTube link
+                  or upload an audio/video file
+                </div>
+                <div className='empty-state-step'>
+                  <span className='empty-state-num'>2</span>Drag the slider or
+                  pick a target key
+                </div>
+                <div className='empty-state-step'>
+                  <span className='empty-state-num'>3</span>Download the
+                  transposed file
+                </div>
               </div>
             </div>
           )}
 
-          <YouTubeInput onSubmit={handleYouTube} disabled={processing || isProcessingYouTube} />
+          <YouTubeInput
+            onSubmit={handleYouTube}
+            disabled={processing || isProcessingYouTube}
+          />
 
           {isProcessingYouTube && (
-            <ProgressBar progress={ytProgress} label={processingStep || "Processing…"} />
+            <ProgressBar
+              progress={ytProgress}
+              label={processingStep || "Processing…"}
+            />
           )}
           {wasmProgress > 0 && (
             <ProgressBar
               progress={wasmProgress}
               label={
-                wasmProgress < 25 ? "Reading file…" :
-                wasmProgress < 55 ? "Decoding audio…" :
-                wasmProgress < 90 ? "Transposing audio…" :
-                "Finalizing…"
+                wasmProgress < 25
+                  ? "Reading file…"
+                  : wasmProgress < 55
+                    ? "Decoding audio…"
+                    : wasmProgress < 90
+                      ? "Transposing audio…"
+                      : "Finalizing…"
               }
             />
           )}
@@ -508,12 +707,21 @@ function App() {
           />
 
           {(youtubeUrl || (file && activeKey)) && (
-            <div style={{ textAlign: "center", marginBottom: 8, fontSize: 13, color: "#cbd5e0" }}>
+            <div
+              style={{
+                textAlign: "center",
+                marginBottom: 8,
+                fontSize: 13,
+                color: "#cbd5e0",
+              }}
+            >
               <span style={{ marginRight: 12 }}>
-                Original key: <span style={{ color: "#90cdf4" }}>{originalKeyLabel}</span>
+                Original key:{" "}
+                <span style={{ color: "#90cdf4" }}>{originalKeyLabel}</span>
               </span>
               <span>
-                Current key: <span style={{ color: "#9ae6b4" }}>{currentKeyLabel}</span>
+                Current key:{" "}
+                <span style={{ color: "#9ae6b4" }}>{currentKeyLabel}</span>
               </span>
             </div>
           )}
@@ -523,8 +731,12 @@ function App() {
             file={file}
             isAnalyzingKey={isAnalyzingKey || isAnalyzingFileKey}
             isProcessingYouTube={isProcessingYouTube}
-            handleAnalyzeKey={youtubeUrl ? handleAnalyzeKey : () => analyzeFileKey(file)}
-            handleReanalyzeKey={youtubeUrl ? () => handleAnalyzeKey() : () => analyzeFileKey(file)}
+            handleAnalyzeKey={
+              youtubeUrl ? handleAnalyzeKey : () => analyzeFileKey(file)
+            }
+            handleReanalyzeKey={
+              youtubeUrl ? () => handleAnalyzeKey() : () => analyzeFileKey(file)
+            }
             keyFeedback={keyFeedback}
             keyAnalyzeDots={keyAnalyzeDots}
             youtubeKey={activeKey}
@@ -557,7 +769,14 @@ function App() {
 
           <Notice notice={notice} />
           {fileReadStatus && wasmProgress === 0 && (
-            <div style={{ textAlign: "center", color: "#f6e05e", fontSize: 13, marginBottom: 6 }}>
+            <div
+              style={{
+                textAlign: "center",
+                color: "#f6e05e",
+                fontSize: 13,
+                marginBottom: 6,
+              }}
+            >
               {fileReadStatus}
             </div>
           )}
@@ -566,8 +785,20 @@ function App() {
           {appError && youtubeUrl && !isProcessingYouTube && (
             <div style={{ textAlign: "center", marginBottom: 8 }}>
               <button
-                onClick={() => { setAppError(""); runTranspose(semitones); }}
-                style={{ background: "#3182ce", color: "#fff", fontWeight: 700, border: "none", borderRadius: 6, padding: "7px 20px", cursor: "pointer", fontSize: 14 }}
+                onClick={() => {
+                  setAppError("");
+                  runTranspose(semitones);
+                }}
+                style={{
+                  background: "#3182ce",
+                  color: "#fff",
+                  fontWeight: 700,
+                  border: "none",
+                  borderRadius: 6,
+                  padding: "7px 20px",
+                  cursor: "pointer",
+                  fontSize: 14,
+                }}
               >
                 Retry
               </button>
@@ -580,7 +811,7 @@ function App() {
                 <div style={{ textAlign: "center", marginBottom: 8 }}>
                   <label style={{ color: "#fff", marginRight: 8 }}>
                     <input
-                      type="checkbox"
+                      type='checkbox'
                       checked={useWasm}
                       onChange={(e) => setUseWasm(e.target.checked)}
                       disabled={processing}
@@ -592,8 +823,17 @@ function App() {
               )}
 
               {youtubeUrl && !isProcessingYouTube && (
-                <div style={{ textAlign: "center", fontSize: 12, color: "#a0aec0", marginTop: 2, marginBottom: 8 }}>
-                  Tip: use +/− for quick transpose previews; latest request is applied.
+                <div
+                  style={{
+                    textAlign: "center",
+                    fontSize: 12,
+                    color: "#a0aec0",
+                    marginTop: 2,
+                    marginBottom: 8,
+                  }}
+                >
+                  Tip: use +/− for quick transpose previews; latest request is
+                  applied.
                 </div>
               )}
 
@@ -624,25 +864,45 @@ function App() {
                     cursor: "pointer",
                   }}
                 >
-                  {showChordDoc ? "Hide Chord Sheet Generator ▲" : "Get Chord Sheet ▼"}
+                  {showChordDoc
+                    ? "Hide Chord Sheet Generator ▲"
+                    : "Get Chord Sheet ▼"}
                 </button>
               </div>
 
               {showChordDoc && (
                 <ChordDocGenerator
-                  songTitle={file?.name || processedItems.find((i) => i.youtubeUrl === youtubeUrl)?.title || ""}
-                  artist={processedItems.find((i) => i.youtubeUrl === youtubeUrl)?.artist || ""}
+                  songTitle={
+                    file?.name ||
+                    processedItems.find((i) => i.youtubeUrl === youtubeUrl)
+                      ?.title ||
+                    ""
+                  }
+                  artist={
+                    processedItems.find((i) => i.youtubeUrl === youtubeUrl)
+                      ?.artist || ""
+                  }
                   selectedKey={currentKeyLabel}
                 />
               )}
             </>
           )}
 
-          <FileUpload onFileSelect={handleFileSelect} disabled={processing || isProcessingYouTube} />
+          <FileUpload
+            onFileSelect={handleFileSelect}
+            disabled={processing || isProcessingYouTube}
+          />
           <FAQ />
         </div>
       </main>
-      <footer style={{ textAlign: "center", color: "#4a5568", fontSize: 12, padding: "16px 0 12px" }}>
+      <footer
+        style={{
+          textAlign: "center",
+          color: "#4a5568",
+          fontSize: 12,
+          padding: "16px 0",
+        }}
+      >
         &copy; {new Date().getFullYear()} Shern Ning
       </footer>
     </div>
