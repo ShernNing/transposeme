@@ -27,3 +27,7 @@ tmp/
 server/tmp/
 
 release-build/
+
+# Local yt-dlp binaries (server uses pip-installed yt-dlp in Docker)
+yt-dlp
+yt-dlp_macos

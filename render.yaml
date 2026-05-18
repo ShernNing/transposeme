@@ -15,4 +15,4 @@ services:
       - key: CORS_ORIGIN
         value: https://transposeme.vercel.app
       - key: COOKIES_PATH
-        value: /app/cookies.txt
+        value: /etc/secrets/cookies.txt
