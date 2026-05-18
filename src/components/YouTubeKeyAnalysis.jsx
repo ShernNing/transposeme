@@ -2,6 +2,7 @@ import React from "react";
 
 export default function YouTubeKeyAnalysis({
   youtubeUrl,
+  file,
   isAnalyzingKey,
   isProcessingYouTube,
   handleAnalyzeKey,
@@ -11,7 +12,7 @@ export default function YouTubeKeyAnalysis({
   youtubeKey,
   children,
 }) {
-  if (!youtubeUrl) return null;
+  if (!youtubeUrl && !file) return null;
   // Decide button label and handler
   let buttonLabel = "Analyze song key";
   let buttonTitle = "Analyze the song key from audio";

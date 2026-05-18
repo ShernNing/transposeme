@@ -9,7 +9,7 @@ const INTERVAL_NAMES = {
   "-9": "Major 6th ↓", "-10": "Minor 7th ↓", "-11": "Major 7th ↓", "-12": "Octave ↓",
 };
 
-const TransposeControls = ({ value, min, max, onChange, onReset, disabled, tempoMode, onTempoModeChange }) => (
+const TransposeControls = ({ value, min, max, onChange, onVisualChange, onReset, disabled, tempoMode, onTempoModeChange }) => (
   <div style={{ margin: '16px 0', textAlign: 'center' }}>
     {/* Mode toggle */}
     <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'center', gap: 8 }}>
@@ -49,7 +49,9 @@ const TransposeControls = ({ value, min, max, onChange, onReset, disabled, tempo
       min={min}
       max={max}
       value={value}
-      onChange={e => onChange(Number(e.target.value))}
+      onChange={e => (onVisualChange || onChange)(Number(e.target.value))}
+      onMouseUp={e => onVisualChange && onChange(Number(e.target.value))}
+      onTouchEnd={e => onVisualChange && onChange(Number(e.target.value))}
       disabled={disabled}
       style={{ margin: '0 12px', verticalAlign: 'middle' }}
     />

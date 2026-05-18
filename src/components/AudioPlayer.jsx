@@ -4,16 +4,25 @@ import { CONFIG } from "../utils/config";
 
 const AudioPlayer = forwardRef(function AudioPlayer({ src, playing, onPlay, onPause, disabled, seekTo, label }, ref) {
   const audioRef = useRef();
+  const currentTimeRef = useRef(0);
   const [playbackRate, setPlaybackRate] = useState(1);
 
-  // Expose the underlying <audio> element via ref
   useImperativeHandle(ref, () => audioRef.current, []);
 
+  // A/B toggle: src changes but seekTo doesn't — restore last known position
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = currentTimeRef.current;
+    }
+  }, [src]);
+
+  // Explicit seek after transpose: seekTo changes — jump to that position
   useEffect(() => {
     if (audioRef.current && seekTo != null) {
       audioRef.current.currentTime = seekTo;
+      currentTimeRef.current = seekTo;
     }
-  }, [src, seekTo]);
+  }, [seekTo]);
 
   useEffect(() => {
     if (audioRef.current) {
@@ -31,6 +40,7 @@ const AudioPlayer = forwardRef(function AudioPlayer({ src, playing, onPlay, onPa
         autoPlay={playing}
         onPlay={onPlay}
         onPause={onPause}
+        onTimeUpdate={() => { currentTimeRef.current = audioRef.current?.currentTime ?? 0; }}
         disabled={disabled}
         className={styles.audioPlayer}
       />

@@ -26,7 +26,7 @@ export default function useFileHandler() {
 
   const handleFile = useCallback((inputFile) => {
     setError(null);
-    if (!inputFile) return;
+    if (!inputFile) { setFile(null); return; }
     if (inputFile.size > 5000 * 1024 * 1024) {
       setError('File is too large (max 5GB). Please choose a smaller file.');
       return;

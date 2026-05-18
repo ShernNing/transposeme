@@ -21,6 +21,7 @@ import useAudioContext from "./hooks/useAudioContext";
 import useProcessedHistory from "./hooks/useProcessedHistory";
 import useYouTubeTranspose from "./hooks/useYouTubeTranspose";
 import useAnimatedDots from "./hooks/useAnimatedDots";
+import ProgressBar from "./components/ProgressBar";
 
 import { isAudio } from "./utils/audioUtils";
 import { audioBufferToWavBlob, extractMetadata } from "./utils/audioUtils";
@@ -51,6 +52,12 @@ function App() {
   const [notice, setNotice] = useState(null);
   const [tempoMode, setTempoMode] = useState(false);
   const [fileReadStatus, setFileReadStatus] = useState("");
+  const [fileKey, setFileKey] = useState("");
+  const [isAnalyzingFileKey, setIsAnalyzingFileKey] = useState(false);
+  const [wasmProgress, setWasmProgress] = useState(0);
+  const [ytProgress, setYtProgress] = useState(0);
+  const ytProgressRef = useRef(0);
+  const ytTickRef = useRef(null);
 
   // --- Hooks ---
   const { file, setFile, error: fileError } = useFileHandler();
@@ -127,7 +134,7 @@ function App() {
   });
 
   const processingDots = useAnimatedDots(isProcessingYouTube || processing);
-  const keyAnalyzeDots = useAnimatedDots(isAnalyzingKey);
+  const keyAnalyzeDots = useAnimatedDots(isAnalyzingKey || isAnalyzingFileKey);
 
   // --- Persist settings ---
   useEffect(() => {
@@ -147,6 +154,42 @@ function App() {
     return () => clearTimeout(timer);
   }, [notice]);
 
+  // --- YouTube progress animation ---
+  useEffect(() => {
+    if (ytTickRef.current) clearInterval(ytTickRef.current);
+    if (!isProcessingYouTube) {
+      if (ytProgressRef.current > 0) {
+        ytProgressRef.current = 100;
+        setYtProgress(100);
+        const t = setTimeout(() => { ytProgressRef.current = 0; setYtProgress(0); }, 600);
+        return () => clearTimeout(t);
+      }
+      return;
+    }
+    const getRange = (step) => {
+      if (!step) return [5, 44];
+      if (step.includes("1/3") || step.includes("Downloading") || step.includes("Applying")) return [5, 44];
+      if (step.includes("2/3") || step.includes("Extracting")) return [48, 64];
+      if (step.includes("3/3") || step.includes("Detecting")) return [68, 88];
+      if (step.includes("Finalizing")) return [88, 94];
+      return [5, 44];
+    };
+    const [floor, ceiling] = getRange(processingStep);
+    if (ytProgressRef.current < floor) {
+      ytProgressRef.current = floor;
+      setYtProgress(floor);
+    }
+    ytTickRef.current = setInterval(() => {
+      if (ytProgressRef.current < ceiling) {
+        const inc = Math.max(0.3, (ceiling - ytProgressRef.current) * 0.03);
+        ytProgressRef.current = Math.min(ceiling, ytProgressRef.current + inc);
+        setYtProgress(Math.round(ytProgressRef.current));
+      }
+    }, 500);
+    return () => clearInterval(ytTickRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isProcessingYouTube, processingStep]);
+
   // --- Cleanup on unmount ---
   useEffect(() => {
     return () => {
@@ -160,15 +203,40 @@ function App() {
 
   // --- Shared WASM transpose logic ---
   const runWasmTranspose = useCallback(async (f, newSemitones) => {
-    const audioBuffer = await (await getAudioContext()).decodeAudioData(await readFileArrayBuffer(f));
+    setWasmProgress(5);
+    const rawBuf = await readFileArrayBuffer(f);
+    setWasmProgress(25);
+    const audioBuffer = await (await getAudioContext()).decodeAudioData(rawBuf.slice(0));
+    setWasmProgress(55);
     const transposedBuffer = await transposeAudioBuffer(
       audioBuffer,
       tempoMode ? 0 : newSemitones,
       tempoMode ? { timeRatio: 1 / Math.pow(2, newSemitones / 12) } : {}
     );
+    setWasmProgress(90);
     const wavBlob = await audioBufferToWavBlob(transposedBuffer);
+    setWasmProgress(100);
     return isVideo(f) ? remuxVideoWithAudio(f, wavBlob) : wavBlob;
   }, [getAudioContext, readFileArrayBuffer, tempoMode]);
+
+  const analyzeFileKey = useCallback(async (audioBlob, filename) => {
+    if (!audioBlob) return;
+    setIsAnalyzingFileKey(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/detect-key`, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream", "X-Filename": (filename || "audio.wav") },
+        body: await audioBlob.arrayBuffer(),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const data = await response.json();
+      setFileKey(data.key || "Unknown");
+    } catch {
+      setFileKey("");
+    } finally {
+      setIsAnalyzingFileKey(false);
+    }
+  }, [API_BASE_URL]);
 
   // --- Handler: File upload ---
   const handleFileSelect = useCallback(async (f) => {
@@ -178,6 +246,7 @@ function App() {
     setYoutubeUrl("");
     setShowOriginalYouTube(true);
     setYoutubeKey("");
+    setFileKey("");
     setSemitones(0);
     setPendingSemitones(null);
     setAppliedSemitones(0);
@@ -190,15 +259,18 @@ function App() {
         try {
           blob = await runWasmTranspose(f, 0);
         } catch (e) {
+          setWasmProgress(0);
           if (isVideo(f)) { setAppError("Video remuxing failed. " + (e.message || "")); return; }
           throw e;
         }
+        setTimeout(() => setWasmProgress(0), 500);
         setTransposedFromBlob(blob);
         setOriginalSrc(URL.createObjectURL(blob));
         setAppliedSemitones(0);
         setPlaying(true);
         const meta = await extractMetadata(blob, isVideo(f) ? "video" : "audio");
         addProcessedItem({ id: `${f.name}::0`, type: isVideo(f) ? "video" : "audio", label: f.name, title: f.name, blob, semitones: 0, isYouTube: false, fileName: f.name, metadata: meta });
+        analyzeFileKey(blob, f.name.replace(/\.[^.]+$/, "") + ".wav");
       } else {
         const result = await transpose(f, 0, isAudio(f) ? "audio" : "video");
         if (result) {
@@ -207,13 +279,15 @@ function App() {
           setPlaying(true);
           const meta = await extractMetadata(result, isAudio(f) ? "audio" : "video");
           addProcessedItem({ id: `${f.name}::0`, type: isAudio(f) ? "audio" : "video", label: f.name, title: f.name, blob: result, semitones: 0, isYouTube: false, fileName: f.name, metadata: meta });
+          analyzeFileKey(result, f.name.replace(/\.[^.]+$/, "") + ".wav");
         }
       }
     } catch (e) {
+      setWasmProgress(0);
       setTransposedSrc(null);
       setAppError("File processing failed. Please check your file and try again. " + (e?.message || "Unknown error"));
     }
-  }, [useWasm, runWasmTranspose, transpose, setTransposedFromBlob, setFile, setYoutubeUrl, setYoutubeKey, addProcessedItem]);
+  }, [useWasm, runWasmTranspose, transpose, setTransposedFromBlob, setFile, setYoutubeUrl, setYoutubeKey, addProcessedItem, analyzeFileKey]);
 
   // --- Handler: Real-time transposition ---
   const runTranspose = useCallback(async (newSemitones) => {
@@ -228,6 +302,7 @@ function App() {
     try {
       if (useWasm && (isAudio(file) || isVideo(file))) {
         const blob = await runWasmTranspose(file, newSemitones);
+        setTimeout(() => setWasmProgress(0), 500);
         setTransposedFromBlob(blob);
         setAppliedSemitones(newSemitones);
         setPendingSemitones(null);
@@ -246,6 +321,7 @@ function App() {
         }
       }
     } catch (e) {
+      setWasmProgress(0);
       setTransposedSrc(null);
       setAppError("Transposition failed: " + (e?.message || "Unknown error"));
     }
@@ -345,11 +421,12 @@ function App() {
   }, [transposedSrc, showNotice]);
 
   // --- Key display ---
-  const originalKeyLabel = youtubeKey || "Unknown";
-  const currentKeyLabel = youtubeKey ? transposeDetectedKey(youtubeKey, appliedSemitones) : "Unknown";
+  const activeKey = youtubeUrl ? youtubeKey : fileKey;
+  const originalKeyLabel = activeKey || "Unknown";
+  const currentKeyLabel = activeKey ? transposeDetectedKey(activeKey, appliedSemitones) : "Unknown";
 
   const keyFeedback = useMemo(() => {
-    if (isAnalyzingKey) {
+    if (isAnalyzingKey || isAnalyzingFileKey) {
       return <span style={{ color: "#f6e05e" }}>Analyzing key from audio...</span>;
     }
     if ((isProcessingYouTube || processing) && pendingSemitones !== null) {
@@ -362,11 +439,11 @@ function App() {
         </>
       );
     }
-    if (youtubeKey) {
+    if (activeKey) {
       return <span style={{ color: "#9ae6b4" }}>Applied {formatSemitoneLabel(appliedSemitones)}</span>;
     }
     return <span style={{ color: "#9ae6b4" }}>Key not analyzed yet.</span>;
-  }, [isAnalyzingKey, isProcessingYouTube, processing, pendingSemitones, processingDots, queuedDelta, youtubeKey, appliedSemitones]);
+  }, [isAnalyzingKey, isAnalyzingFileKey, isProcessingYouTube, processing, pendingSemitones, processingDots, queuedDelta, activeKey, appliedSemitones]);
 
   return (
     <div className="App">
@@ -394,6 +471,21 @@ function App() {
 
           <YouTubeInput onSubmit={handleYouTube} disabled={processing || isProcessingYouTube} />
 
+          {isProcessingYouTube && (
+            <ProgressBar progress={ytProgress} label={processingStep || "Processing…"} />
+          )}
+          {wasmProgress > 0 && (
+            <ProgressBar
+              progress={wasmProgress}
+              label={
+                wasmProgress < 25 ? "Reading file…" :
+                wasmProgress < 55 ? "Decoding audio…" :
+                wasmProgress < 90 ? "Transposing audio…" :
+                "Finalizing…"
+              }
+            />
+          )}
+
           <PlayerSection
             file={file}
             youtubeUrl={youtubeUrl}
@@ -414,7 +506,7 @@ function App() {
             setShowOriginal={setShowOriginalAB}
           />
 
-          {youtubeUrl && (
+          {(youtubeUrl || (file && activeKey)) && (
             <div style={{ textAlign: "center", marginBottom: 8, fontSize: 13, color: "#cbd5e0" }}>
               <span style={{ marginRight: 12 }}>
                 Original key: <span style={{ color: "#90cdf4" }}>{originalKeyLabel}</span>
@@ -427,18 +519,19 @@ function App() {
 
           <YouTubeKeyAnalysis
             youtubeUrl={youtubeUrl}
-            isAnalyzingKey={isAnalyzingKey}
+            file={file}
+            isAnalyzingKey={isAnalyzingKey || isAnalyzingFileKey}
             isProcessingYouTube={isProcessingYouTube}
-            handleAnalyzeKey={handleAnalyzeKey}
-            handleReanalyzeKey={() => handleAnalyzeKey()}
+            handleAnalyzeKey={youtubeUrl ? handleAnalyzeKey : () => analyzeFileKey(file)}
+            handleReanalyzeKey={youtubeUrl ? () => handleAnalyzeKey() : () => analyzeFileKey(file)}
             keyFeedback={keyFeedback}
             keyAnalyzeDots={keyAnalyzeDots}
-            youtubeKey={youtubeKey}
+            youtubeKey={activeKey}
           >
             <KeySelector
-              youtubeKey={youtubeKey}
+              youtubeKey={activeKey}
               appliedSemitones={appliedSemitones}
-              processing={processing}
+              processing={processing || isAnalyzingFileKey}
               isProcessingYouTube={isProcessingYouTube}
               handleTranspose={handleTranspose}
               processedItems={processedItems}
@@ -453,6 +546,7 @@ function App() {
               min={CONFIG.SEMITONE_MIN}
               max={CONFIG.SEMITONE_MAX}
               onChange={handleTranspose}
+              onVisualChange={setSemitones}
               onReset={handleResetTranspose}
               disabled={processing || isProcessingYouTube}
               tempoMode={tempoMode}
@@ -461,7 +555,7 @@ function App() {
           )}
 
           <Notice notice={notice} />
-          {fileReadStatus && (
+          {fileReadStatus && wasmProgress === 0 && (
             <div style={{ textAlign: "center", color: "#f6e05e", fontSize: 13, marginBottom: 6 }}>
               {fileReadStatus}
             </div>
@@ -496,11 +590,9 @@ function App() {
                 </div>
               )}
 
-              {youtubeUrl && (
+              {youtubeUrl && !isProcessingYouTube && (
                 <div style={{ textAlign: "center", fontSize: 12, color: "#a0aec0", marginTop: 2, marginBottom: 8 }}>
-                  {isProcessingYouTube
-                    ? <><span style={{ color: "#9ae6b4" }}>{processingStep || "Processing…"}</span>{" — this can take 10–60 seconds"}</>
-                    : "Tip: use +/− for quick transpose previews; latest request is applied."}
+                  Tip: use +/− for quick transpose previews; latest request is applied.
                 </div>
               )}
 

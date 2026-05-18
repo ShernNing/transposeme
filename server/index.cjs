@@ -90,12 +90,14 @@ async function printDependencyErrors(results) {
 const cors = require("cors");
 const helmet = require("helmet");
 const fs = require("fs");
+const os = require("os");
 const { v4: uuidv4 } = require("uuid");
 const path = require("path");
 const REQUEST_WINDOW_MS = 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 20;
 const YT_TIMEOUT_MS = 120000;
 const RUBBERBAND_TIMEOUT_MS = 120000;
+const RB_THREADS = String(Math.max(2, Math.min(os.cpus().length, 8)));
 const PYTHON_TIMEOUT_MS = 60000;
 const MAX_VIDEO_DURATION_SECONDS = 1200;
 const COOKIES_PATH = process.env.COOKIES_PATH || "/app/cookies.txt";
@@ -491,15 +493,28 @@ app.post("/api/youtube-key", async (req, res) => {
     });
   }
   const jobPromise = (async () => {
-    const id = uuidv4();
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-    const audioPath = path.join(tmpDir, `${id}.wav`);
-    await downloadAudio(url, audioPath);
+
+    // Reuse already-downloaded audio from a prior transpose(semitones=0) request if available
+    const transposeCacheKey = `${url}::0::p`;
+    const cachedAudioPath = transposeCache.has(transposeCacheKey)
+      ? transposeCache.get(transposeCacheKey)
+      : null;
+    const reusingCached = cachedAudioPath && fs.existsSync(cachedAudioPath);
+
+    let audioPath;
+    if (reusingCached) {
+      audioPath = cachedAudioPath;
+    } else {
+      audioPath = path.join(tmpDir, `${uuidv4()}.wav`);
+      await downloadAudio(url, audioPath);
+    }
+
     let keyResult = "";
     try {
       await new Promise((resolve, reject) => {
         execFile(
-          deps.pythonBin, // already resolved, no need to re-evaluate platform
+          deps.pythonBin,
           [path.join(__dirname, "detect_key.py"), audioPath],
           { env: process.env, timeout: PYTHON_TIMEOUT_MS },
           (err, stdout, stderr) => {
@@ -510,7 +525,7 @@ app.post("/api/youtube-key", async (req, res) => {
         );
       });
     } finally {
-      safeUnlink(audioPath);
+      if (!reusingCached) safeUnlink(audioPath);
     }
     if (!keyResult) throw new Error("Key detection returned empty result");
     keyCache.set(url, keyResult);
@@ -529,6 +544,44 @@ app.post("/api/youtube-key", async (req, res) => {
     });
   } finally {
     pendingJobs.delete(url);
+  }
+});
+
+// POST /api/detect-key
+// Body: raw audio binary (application/octet-stream)
+// Header: X-Filename: originalfile.mp3
+app.post("/api/detect-key", express.raw({ type: "application/octet-stream", limit: "100mb" }), async (req, res) => {
+  if (!enforceRateLimit(req, res)) return;
+  if (!req.body || !req.body.length) return res.status(400).json({ error: "No audio data provided" });
+  const deps = await getDependencyStatus();
+  if (!deps.pythonOk) return res.status(500).json({ error: "Missing python3", hint: "Install Python 3." });
+  if (!deps.essentiaOk) return res.status(500).json({ error: "Missing essentia", hint: "pip install essentia" });
+  const rawName = req.headers["x-filename"] || "";
+  const ext = path.extname(rawName).toLowerCase() || ".mp3";
+  const id = uuidv4();
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+  const audioPath = path.join(tmpDir, `${id}${ext}`);
+  try {
+    fs.writeFileSync(audioPath, req.body);
+    let keyResult = "";
+    await new Promise((resolve, reject) => {
+      execFile(
+        deps.pythonBin,
+        [path.join(__dirname, "detect_key.py"), audioPath],
+        { env: process.env, timeout: PYTHON_TIMEOUT_MS },
+        (err, stdout, stderr) => {
+          keyResult = stdout.trim();
+          if (err) return reject(new Error(stderr || err.message));
+          resolve();
+        },
+      );
+    });
+    if (!keyResult) throw new Error("Key detection returned empty result");
+    res.json({ key: keyResult });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to detect key", details: e.message });
+  } finally {
+    safeUnlink(audioPath);
   }
 });
 
@@ -595,40 +648,25 @@ app.post("/api/youtube-transpose", async (req, res) => {
     try {
       await downloadAudio(url, audioPath);
 
-      // Convert to 16-bit PCM WAV for rubberband compatibility
-      const pcmPath = path.join(tmpDir, `${id}-pcm.wav`);
-      await new Promise((resolve, reject) => {
-        execFile(
-          "ffmpeg",
-          [
-            "-y",
-            "-i",
-            audioPath,
-            "-acodec",
-            "pcm_s16le",
-            "-ar",
-            "44100",
-            pcmPath,
-          ],
-          { timeout: 30000 },
-          (err, _stdout, stderr) => {
-            if (err) return reject(new Error(stderr || err));
-            try {
-              fs.unlinkSync(audioPath);
-            } catch {}
-            try {
-              fs.renameSync(pcmPath, audioPath);
-            } catch (renameErr) {
-              return reject(renameErr);
-            }
-            resolve();
-          },
-        );
-      });
-
       if (semitoneNum !== 0 || isTempo) {
+        // Convert to 16-bit PCM WAV for rubberband compatibility
+        const pcmPath = path.join(tmpDir, `${id}-pcm.wav`);
+        await new Promise((resolve, reject) => {
+          execFile(
+            "ffmpeg",
+            ["-y", "-i", audioPath, "-acodec", "pcm_s16le", "-ar", "44100", pcmPath],
+            { timeout: 30000 },
+            (err, _stdout, stderr) => {
+              if (err) return reject(new Error(stderr || err));
+              try { fs.unlinkSync(audioPath); } catch {}
+              try { fs.renameSync(pcmPath, audioPath); } catch (e) { return reject(e); }
+              resolve();
+            },
+          );
+        });
+
         const timeRatio = (1 / Math.pow(2, semitoneNum / 12)).toFixed(6);
-        const rbArgs = ["-3", "--formant"];
+        const rbArgs = ["--threads", RB_THREADS, "--formant"];
         if (isTempo) {
           rbArgs.push("-t", timeRatio);
         } else {
@@ -647,6 +685,7 @@ app.post("/api/youtube-transpose", async (req, res) => {
           );
         });
       } else {
+        // No pitch/tempo change — skip PCM conversion entirely
         fs.copyFileSync(audioPath, outPath);
       }
     } finally {
