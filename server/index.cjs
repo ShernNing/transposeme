@@ -217,6 +217,7 @@ app.get("/", (_req, res) => {
     message: "TransposeMe Server is running.",
     routes: {
       health: "/api/health",
+      status: "/api/status",
       youtubeKey: "/api/youtube-key (POST)",
       youtubeTranspose: "/api/youtube-transpose (POST)",
       fetchUrl: "/api/fetch-url (POST)",
@@ -445,7 +446,11 @@ async function getDependencyStatus({ fresh = false } = {}) {
   return depStatusCache;
 }
 
-app.get("/api/health", async (_req, res) => {
+app.get("/api/health", (_req, res) => {
+  res.status(200).json({ ok: true });
+});
+
+app.get("/api/status", async (_req, res) => {
   const status = await getDependencyStatus({ fresh: true });
   const ok =
     status.ytDlpOk && status.rubberbandOk && status.ffmpegOk && status.pythonOk;
