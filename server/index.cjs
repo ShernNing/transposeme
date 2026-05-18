@@ -99,6 +99,8 @@ const RUBBERBAND_TIMEOUT_MS = 120000;
 const RB_THREADS = String(Math.max(2, Math.min(os.cpus().length, 8)));
 const PYTHON_TIMEOUT_MS = 60000;
 const MAX_VIDEO_DURATION_SECONDS = 1200;
+const COOKIES_PATH = process.env.COOKIES_PATH || "/app/cookies.txt";
+const COOKIES_EXISTS = fs.existsSync(COOKIES_PATH);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
 if (CORS_ORIGIN === "*" && process.env.NODE_ENV === "production") {
   console.warn("[startup] Warning: CORS_ORIGIN is wildcard (*) in production. Set CORS_ORIGIN env var to restrict access.");
@@ -335,12 +337,25 @@ function enforceRateLimit(req, res) {
   return true;
 }
 
+async function getWritableCookiesPath() {
+  if (!COOKIES_EXISTS) return null;
+  // /etc/secrets is read-only on Render; copy to writable tmp location
+  const dest = path.join(tmpDir, "cookies.txt");
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+  fs.copyFileSync(COOKIES_PATH, dest);
+  return dest;
+}
+
 async function downloadAudio(url, audioPath) {
-  // android_vr is jsless — no sig/n challenge, no JS runtime needed.
-  // It does not support cookies; passing --cookies causes yt-dlp to skip it entirely.
+  const cookiesPath = await getWritableCookiesPath();
   const ytDlpArgs = [
+    // EJS challenge solver (sig/n decryption). Node.js is installed in the Docker image.
+    "--remote-components",
+    "ejs:github",
+    "--js-runtimes",
+    "node",
     "--extractor-args",
-    "youtube:player_client=android_vr",
+    "youtube:player_client=default",
     "--proxy",
     "",
     "--match-filter",
@@ -351,6 +366,9 @@ async function downloadAudio(url, audioPath) {
     "-o",
     audioPath,
   ];
+  if (cookiesPath) {
+    ytDlpArgs.unshift("--cookies", cookiesPath);
+  }
   ytDlpArgs.push(url);
 
   await new Promise((resolve, reject) => {
