@@ -337,10 +337,19 @@ function enforceRateLimit(req, res) {
   return true;
 }
 
+async function getWritableCookiesPath() {
+  if (!COOKIES_EXISTS) return null;
+  // /etc/secrets is read-only on Render; copy to writable tmp location
+  const dest = path.join(tmpDir, "cookies.txt");
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+  fs.copyFileSync(COOKIES_PATH, dest);
+  return dest;
+}
+
 async function downloadAudio(url, audioPath) {
   const ytDlpArgs = [
     "--extractor-args",
-    "youtube:player_client=tv_embedded,web",
+    "youtube:player_client=web",
     "--proxy",
     "",
     "--match-filter",
@@ -351,8 +360,9 @@ async function downloadAudio(url, audioPath) {
     "-o",
     audioPath,
   ];
-  if (COOKIES_EXISTS) {
-    ytDlpArgs.unshift("--cookies", COOKIES_PATH);
+  const cookiesPath = await getWritableCookiesPath();
+  if (cookiesPath) {
+    ytDlpArgs.unshift("--cookies", cookiesPath);
   }
   ytDlpArgs.push(url);
 
