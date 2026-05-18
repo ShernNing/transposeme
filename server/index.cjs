@@ -237,6 +237,7 @@ const ALLOWED_CHORD_HOSTS = new Set([
 // POST /api/fetch-url
 // { url: string }
 // Proxy for chord sheet fetching — only allowed hosts above.
+const axios = require("axios");
 app.post("/api/fetch-url", async (req, res) => {
   const { url } = req.body;
   if (!url || typeof url !== "string")
@@ -252,47 +253,39 @@ app.post("/api/fetch-url", async (req, res) => {
   if (!ALLOWED_CHORD_HOSTS.has(parsed.hostname))
     return res.status(403).json({ error: "Host not allowed" });
 
-  const mod = parsed.protocol === "https:" ? require("https") : require("http");
   try {
-    const text = await new Promise((resolve, reject) => {
-      const request = mod.get(
-        url,
-        {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (compatible; TransposeMe/1.0; +https://transposeme.app)",
-            Accept: "text/html,application/xhtml+xml",
-          },
-          timeout: 15000,
-        },
-        (resp) => {
-          if (resp.statusCode !== 200) {
-            resp.resume();
-            return reject(new Error(`HTTP ${resp.statusCode}`));
-          }
-          let data = "";
-          resp.setEncoding("utf8");
-          resp.on("data", (chunk) => {
-            data += chunk;
-            if (data.length > 5 * 1024 * 1024) {
-              request.destroy();
-              reject(new Error("Response too large"));
+    const response = await axios.get(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Accept-Encoding": "gzip, deflate, br",
+      },
+      timeout: 15000,
+      maxRedirects: 5,
+      maxContentLength: 5 * 1024 * 1024,
+      responseType: "text",
+      validateStatus: (status) => status < 500,
+      beforeRedirect: (options, { headers }) => {
+        const location = headers.location;
+        if (location) {
+          try {
+            const redirectHost = new URL(location, url).hostname;
+            if (!ALLOWED_CHORD_HOSTS.has(redirectHost)) {
+              throw new Error(`Redirect to disallowed host: ${redirectHost}`);
             }
-          });
-          resp.on("end", () => resolve(data));
-        },
-      );
-      request.on("error", reject);
-      request.on("timeout", () => {
-        request.destroy();
-        reject(new Error("Request timeout"));
-      });
+          } catch (e) {
+            throw e;
+          }
+        }
+      },
     });
-    res.type("text/plain").send(text);
+    if (response.status >= 400) {
+      return res.status(404).json({ error: `Upstream returned ${response.status}` });
+    }
+    res.type("text/plain").send(response.data);
   } catch (e) {
-    res
-      .status(500)
-      .json({ error: "Fetch failed", details: e.message });
+    res.status(500).json({ error: "Fetch failed", details: e.message });
   }
 });
 

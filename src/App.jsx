@@ -58,6 +58,7 @@ function App() {
   const [ytProgress, setYtProgress] = useState(0);
   const ytProgressRef = useRef(0);
   const ytTickRef = useRef(null);
+  const [showChordDoc, setShowChordDoc] = useState(false);
 
   // --- Hooks ---
   const { file, setFile, error: fileError } = useFileHandler();
@@ -609,11 +610,31 @@ function App() {
 
               <ChordSheet keyLabel={currentKeyLabel} />
 
-              <ChordDocGenerator
-                songTitle={file?.name || processedItems.find((i) => i.youtubeUrl === youtubeUrl)?.title || ""}
-                artist={processedItems.find((i) => i.youtubeUrl === youtubeUrl)?.artist || ""}
-                selectedKey={currentKeyLabel}
-              />
+              <div style={{ textAlign: "center", marginTop: 8 }}>
+                <button
+                  onClick={() => setShowChordDoc((v) => !v)}
+                  style={{
+                    background: showChordDoc ? "#4a5568" : "#2d3748",
+                    color: "#f6e05e",
+                    border: "1px solid #4a5568",
+                    borderRadius: 6,
+                    padding: "6px 18px",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  {showChordDoc ? "Hide Chord Sheet Generator ▲" : "Get Chord Sheet ▼"}
+                </button>
+              </div>
+
+              {showChordDoc && (
+                <ChordDocGenerator
+                  songTitle={file?.name || processedItems.find((i) => i.youtubeUrl === youtubeUrl)?.title || ""}
+                  artist={processedItems.find((i) => i.youtubeUrl === youtubeUrl)?.artist || ""}
+                  selectedKey={currentKeyLabel}
+                />
+              )}
             </>
           )}
 

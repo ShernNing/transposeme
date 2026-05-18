@@ -29,7 +29,8 @@
       "Bash(open \"http://localhost:5173\")",
       "mcp__Claude_in_Chrome__list_connected_browsers",
       "Bash(npm run *)",
-      "Bash(node -e \"const os = require\\('os'\\); console.log\\('CPUs:', os.cpus\\(\\).length\\);\")"
+      "Bash(node -e \"const os = require\\('os'\\); console.log\\('CPUs:', os.cpus\\(\\).length\\);\")",
+      "Bash(xargs ls -la)"
     ]
   }
 }
