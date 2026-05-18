@@ -7,10 +7,10 @@ RUN apt-get update && \
     apt-get install -y ffmpeg rubberband-cli build-essential libfftw3-dev libsamplerate0-dev libtag1-dev curl && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies (Essentia, yt-dlp)
+# Install Python dependencies (yt-dlp required; essentia optional for key detection)
 RUN pip install --upgrade pip && \
-    pip install essentia && \
-    pip install --upgrade yt-dlp
+    pip install --upgrade yt-dlp && \
+    pip install essentia || echo "[warn] essentia install failed — youtube-key endpoint will be unavailable"
 
 # Install Node.js (from NodeSource)
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \

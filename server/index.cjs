@@ -79,7 +79,6 @@ async function printDependencyErrors(results) {
       "\x1b[33mPlease install the missing dependencies and restart the server.\x1b[0m",
     );
     console.error("\x1b[33mSee README.md for setup instructions.\x1b[0m");
-    process.exit(1);
   }
 }
 
@@ -341,7 +340,7 @@ function enforceRateLimit(req, res) {
 async function downloadAudio(url, audioPath) {
   const ytDlpArgs = [
     "--extractor-args",
-    "youtube:player_client=android",
+    "youtube:player_client=tv_embedded,web",
     "--proxy",
     "",
     "--match-filter",
