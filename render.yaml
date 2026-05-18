@@ -3,7 +3,8 @@ services:
     name: transposeme-server
     runtime: docker
     plan: free
-    dockerfilePath: Dockerfile.conda
+    dockerfilePath: server/Dockerfile.conda
+    dockerContext: server
     autoDeploy: true
     envVars:
       - key: PORT
