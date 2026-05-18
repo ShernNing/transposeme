@@ -642,6 +642,9 @@ function App() {
           <FAQ />
         </div>
       </main>
+      <footer style={{ textAlign: "center", color: "#4a5568", fontSize: 12, padding: "16px 0 12px" }}>
+        &copy; {new Date().getFullYear()} Shern Ning
+      </footer>
     </div>
   );
 }

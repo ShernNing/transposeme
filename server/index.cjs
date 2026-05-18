@@ -96,7 +96,6 @@ const REQUEST_WINDOW_MS = 60 * 1000;
 const MAX_REQUESTS_PER_WINDOW = 20;
 const YT_TIMEOUT_MS = 120000;
 const RUBBERBAND_TIMEOUT_MS = 120000;
-const RB_THREADS = String(Math.max(2, Math.min(os.cpus().length, 8)));
 const PYTHON_TIMEOUT_MS = 60000;
 const MAX_VIDEO_DURATION_SECONDS = 1200;
 const COOKIES_PATH = process.env.COOKIES_PATH || "/app/cookies.txt";
@@ -678,7 +677,7 @@ app.post("/api/youtube-transpose", async (req, res) => {
         });
 
         const timeRatio = (1 / Math.pow(2, semitoneNum / 12)).toFixed(6);
-        const rbArgs = ["--threads", RB_THREADS, "--formant"];
+        const rbArgs = ["--formant"];
         if (isTempo) {
           rbArgs.push("-t", timeRatio);
         } else {
