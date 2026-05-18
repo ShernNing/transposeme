@@ -904,12 +904,12 @@ function App() {
         }}
       >
         <div style={{ marginBottom: 8 }}>
-          <span style={{ color: "#718096", marginRight: 8 }}>My Apps:</span>
+          {/* <span style={{ color: "#718096", marginRight: 8 }}>Apps:</span> */}
           {[
-            { label: "TransposeMe", url: "https://transposeme.vercel.app/" },
-            { label: "ChordVault", url: "https://chordvault-ten.vercel.app/" },
+            // { label: "TransposeMe", url: "https://transposeme.vercel.app/" },
+            { label: "Chord Vault", url: "https://chordvault-ten.vercel.app/" },
             {
-              label: "WorkoutTracker",
+              label: "Workout Tracker",
               url: "https://workouttracker-xi.vercel.app",
             },
           ].map(({ label, url }) => (
@@ -931,8 +931,8 @@ function App() {
               {label}
             </a>
           ))}
+          &copy; {new Date().getFullYear()} Shern Ning
         </div>
-        &copy; {new Date().getFullYear()} Shern Ning
       </footer>
     </div>
   );
