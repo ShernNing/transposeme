@@ -4,7 +4,12 @@ import { CONFIG } from "../utils/config";
 
 // Human-readable errors from backend payloads
 function prettyApiError(fallback, payloadText = "") {
-  const text = (payloadText || "").toLowerCase();
+  // Parse JSON to avoid false-positives from the hint field containing words like "proxy"
+  let text = (payloadText || "").toLowerCase();
+  try {
+    const parsed = JSON.parse(payloadText);
+    text = ((parsed.details || "") + " " + (parsed.error || "")).toLowerCase();
+  } catch {}
   if (text.includes("proxy") || text.includes("403"))
     return "Network/proxy blocked YouTube download. Please disable any proxy/VPN and try again.";
   if (text.includes("private video") || text.includes("video unavailable"))

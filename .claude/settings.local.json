@@ -44,7 +44,8 @@
       "Bash(curl -s https://api.github.com/repos/denoland/deno/releases/latest)",
       "Bash(yt-dlp --remote-components ejs:github --extractor-args \"youtube:player_client=default\" --proxy \"\" --simulate \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\")",
       "Bash(python3 -c \"import yt_dlp.jsc; print\\([x for x in dir\\(yt_dlp.jsc\\) if not x.startswith\\('_'\\)]\\)\")",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(find /Users/shernningtan/Documents/Codes/Code/transposeme -name \"server*\" -o -name \"*.server.*\" 2>/dev/null | grep -v release-build | grep -v node_modules && ls /Users/shernningtan/Documents/Codes/Code/)"
     ]
   }
 }

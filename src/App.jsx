@@ -903,6 +903,35 @@ function App() {
           padding: "16px 0",
         }}
       >
+        <div style={{ marginBottom: 8 }}>
+          <span style={{ color: "#718096", marginRight: 8 }}>My Apps:</span>
+          {[
+            { label: "TransposeMe", url: "https://transposeme.vercel.app/" },
+            { label: "ChordVault", url: "https://chordvault-ten.vercel.app/" },
+            {
+              label: "WorkoutTracker",
+              url: "https://workouttracker-xi.vercel.app",
+            },
+          ].map(({ label, url }) => (
+            <a
+              key={label}
+              href={url}
+              target='_blank'
+              rel='noopener noreferrer'
+              style={{
+                color: "#667eea",
+                textDecoration: "none",
+                marginRight: 12,
+              }}
+              onMouseEnter={(e) =>
+                (e.target.style.textDecoration = "underline")
+              }
+              onMouseLeave={(e) => (e.target.style.textDecoration = "none")}
+            >
+              {label}
+            </a>
+          ))}
+        </div>
         &copy; {new Date().getFullYear()} Shern Ning
       </footer>
     </div>
