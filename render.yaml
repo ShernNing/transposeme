@@ -13,6 +13,6 @@ services:
       - key: NODE_ENV
         value: production
       - key: CORS_ORIGIN
-        value: https://your-app.vercel.app  # Replace with your actual Vercel URL
+        value: https://transposeme.vercel.app
       - key: COOKIES_PATH
         value: /app/cookies.txt
