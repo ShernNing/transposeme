@@ -65,6 +65,8 @@ function App() {
   const ytProgressRef = useRef(0);
   const ytTickRef = useRef(null);
   const [showChordDoc, setShowChordDoc] = useState(false);
+  const [showSlowTransposeNote, setShowSlowTransposeNote] = useState(false);
+  const slowTransposeTimerRef = useRef(null);
 
   // --- Hooks ---
   const { file, setFile, error: fileError } = useFileHandler();
@@ -173,6 +175,30 @@ function App() {
     const timer = setTimeout(() => setNotice(null), CONFIG.NOTICE_DURATION_MS);
     return () => clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    if (slowTransposeTimerRef.current) {
+      clearTimeout(slowTransposeTimerRef.current);
+      slowTransposeTimerRef.current = null;
+    }
+
+    if (processing || isProcessingYouTube) {
+      setShowSlowTransposeNote(false);
+      slowTransposeTimerRef.current = setTimeout(
+        () => setShowSlowTransposeNote(true),
+        30000,
+      );
+    } else {
+      setShowSlowTransposeNote(false);
+    }
+
+    return () => {
+      if (slowTransposeTimerRef.current) {
+        clearTimeout(slowTransposeTimerRef.current);
+        slowTransposeTimerRef.current = null;
+      }
+    };
+  }, [processing, isProcessingYouTube]);
 
   // --- YouTube progress animation ---
   useEffect(() => {
@@ -632,6 +658,24 @@ function App() {
           Shift pitch &amp; tempo of YouTube videos and audio files — locally,
           instantly.
         </p>
+        {showSlowTransposeNote && (
+          <div
+            style={{
+              margin: "12px auto",
+              maxWidth: "600px",
+              padding: "12px 16px",
+              borderRadius: 8,
+              background: "#2d3748",
+              border: "1px solid #4a5568",
+              color: "#f6e05e",
+              fontSize: 13,
+              fontWeight: 500,
+            }}
+          >
+            ⏱️ This transpose is taking longer than expected. Due to server
+            bottlenecks, it may take 1 to 5 minutes to complete.
+          </div>
+        )}
         <div className='app-card'>
           <ProcessedHistory
             processedItems={processedItems}
