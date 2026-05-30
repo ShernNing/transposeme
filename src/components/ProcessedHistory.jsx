@@ -185,6 +185,7 @@ export default function ProcessedHistory({ processedItems, onLoad, onDelete, onC
                 background: hoveredId === item.id ? "#38405a" : "#23272f",
                 color: hoveredId === item.id ? "#9ae6b4" : "#e2e8f0",
                 fontSize: 14, fontWeight: 500, cursor: "pointer", minWidth: 90,
+                maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 boxShadow: hoveredId === item.id ? "0 2px 8px #0002" : undefined,
                 transition: 'all 0.15s',
               }}
@@ -192,7 +193,7 @@ export default function ProcessedHistory({ processedItems, onLoad, onDelete, onC
             >
               {item.fileName || item.title || item.label || item.youtubeUrl}
             </button>
-            <span style={{ color: '#b5b5b5', fontSize: 12, flex: 1 }}>
+            <span style={{ color: '#b5b5b5', fontSize: 12, flex: 1, minWidth: 0, overflow: 'hidden' }}>
               {item.metadata && (
                 <>
                   {item.metadata.duration && <span>⏱ {formatDuration(item.metadata.duration)} </span>}
