@@ -57,7 +57,10 @@
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
       "Bash(curl -s https://transposeme-server.onrender.com/api/status)",
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "Bash(npx eslint *)",
+      "Bash(git -C /Users/shernningtan/Documents/Codes/Code/transposeme blame -L 610,615 src/App.jsx)",
+      "Bash(npm uninstall *)"
     ]
   }
 }

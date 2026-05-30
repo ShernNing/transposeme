@@ -519,17 +519,34 @@ function App() {
 
   // --- Handler: Load from history ---
   const handleLoadProcessed = useCallback(
-    (item) => {
-      if (item.blob) {
+    async (item) => {
+      const blob = item.blob;
+
+      // No stored blob → re-download from YouTube link
+      if (!blob && !item.src && item.isYouTube && item.youtubeUrl) {
+        showNotice("success", `Re-downloading "${item.label}" from YouTube…`);
+        setFile(null);
+        setYoutubeKey(item.metadata?.key || "");
+        await handleYouTube(item.youtubeUrl);
+        if (Number(item.semitones) !== 0) {
+          handleTranspose(Number(item.semitones));
+        }
+        return;
+      }
+
+      if (blob) {
         setTransposedSrc((prev) => {
           if (prev) URL.revokeObjectURL(prev);
-          return URL.createObjectURL(item.blob);
+          return URL.createObjectURL(blob);
         });
-      } else {
+      } else if (item.src) {
         setTransposedSrc(item.src);
+      } else {
+        setAppError("This history item has no playable data.");
+        return;
       }
-      setSemitones(item.semitones);
-      setAppliedSemitones(item.semitones);
+      setSemitones(Number(item.semitones));
+      setAppliedSemitones(Number(item.semitones));
       setPendingSemitones(null);
       if (item.isYouTube) {
         setYoutubeUrl(item.youtubeUrl);
@@ -550,7 +567,15 @@ function App() {
       setTimeout(() => setPlaying(true), 0);
       showNotice("success", `Loaded from history: ${item.label}`);
     },
-    [handleAnalyzeKey, showNotice, setFile, setYoutubeUrl, setYoutubeKey],
+    [
+      handleAnalyzeKey,
+      handleYouTube,
+      handleTranspose,
+      showNotice,
+      setFile,
+      setYoutubeUrl,
+      setYoutubeKey,
+    ],
   );
 
   // --- Download / Share ---
