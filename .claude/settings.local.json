@@ -60,7 +60,8 @@
       "Bash(git rm *)",
       "Bash(npx eslint *)",
       "Bash(git -C /Users/shernningtan/Documents/Codes/Code/transposeme blame -L 610,615 src/App.jsx)",
-      "Bash(npm uninstall *)"
+      "Bash(npm uninstall *)",
+      "Bash(node -c index.cjs)"
     ]
   }
 }

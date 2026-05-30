@@ -141,9 +141,15 @@ class BoundedCache {
 
 const transposeCache = new BoundedCache(CACHE_MAX_SIZE, CACHE_TTL_MS);
 const keyCache = new BoundedCache(CACHE_MAX_SIZE, CACHE_TTL_MS);
+// Decoded source audio (PCM 16le 44.1k wav) cached per URL — downloaded + decoded
+// once, then reused for every transpose/key request. Avoids re-downloading the
+// same video for each semitone change.
+const sourceCache = new BoundedCache(CACHE_MAX_SIZE, CACHE_TTL_MS);
 const requestHits = new Map();
 // In-flight job deduplication: jobKey -> Promise
 const pendingJobs = new Map();
+// In-flight source download/decode dedup: url -> Promise<pcmPath>
+const pendingSource = new Map();
 
 const app = express();
 app.set("trust proxy", 1);
@@ -346,7 +352,10 @@ async function getWritableCookiesPath() {
   return dest;
 }
 
-async function downloadAudio(url, audioPath) {
+// Download the native best-audio stream to outPath (raw container — m4a/opus/webm).
+// No WAV extraction here: decoding to PCM happens once in getSourceAudio, avoiding a
+// redundant transcode. `-N` downloads fragments in parallel for faster network IO.
+async function downloadAudio(url, outPath) {
   const cookiesPath = await getWritableCookiesPath();
   const ytDlpArgs = [
     // EJS challenge solver (sig/n decryption). Node.js is installed in the Docker image.
@@ -360,11 +369,12 @@ async function downloadAudio(url, audioPath) {
     "",
     "--match-filter",
     `duration <= ${MAX_VIDEO_DURATION_SECONDS}`,
-    "-x",
-    "--audio-format",
-    "wav",
+    "-f",
+    "bestaudio/best",
+    "-N",
+    "4",
     "-o",
-    audioPath,
+    outPath,
   ];
   if (cookiesPath) {
     ytDlpArgs.unshift("--cookies", cookiesPath);
@@ -386,6 +396,45 @@ async function downloadAudio(url, audioPath) {
       },
     );
   });
+}
+
+// Returns a path to the decoded source audio (PCM 16le 44.1k WAV) for a URL,
+// cached per URL. Downloads + decodes once; subsequent calls (other semitones,
+// key detection) reuse the same file. Concurrent callers share one in-flight job.
+async function getSourceAudio(url) {
+  const cached = sourceCache.get(url);
+  if (cached && fs.existsSync(cached)) return cached;
+  if (pendingSource.has(url)) return pendingSource.get(url);
+
+  const promise = (async () => {
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    const id = uuidv4();
+    const dlPath = path.join(tmpDir, `${id}.download`);
+    const pcmPath = path.join(tmpDir, `${id}-src.wav`);
+    await downloadAudio(url, dlPath);
+    // Single decode: native container -> PCM 16le 44.1k WAV (rubberband + essentia ready)
+    await new Promise((resolve, reject) => {
+      execFile(
+        "ffmpeg",
+        ["-y", "-i", dlPath, "-acodec", "pcm_s16le", "-ar", "44100", pcmPath],
+        { timeout: 60000 },
+        (err, _stdout, stderr) => {
+          safeUnlink(dlPath);
+          if (err) return reject(new Error(stderr || err));
+          resolve();
+        },
+      );
+    });
+    sourceCache.set(url, pcmPath);
+    return pcmPath;
+  })();
+
+  pendingSource.set(url, promise);
+  try {
+    return await promise;
+  } finally {
+    pendingSource.delete(url);
+  }
 }
 
 function getDirectNetworkEnv() {
@@ -504,40 +553,23 @@ app.post("/api/youtube-key", async (req, res) => {
     });
   }
   const jobPromise = (async () => {
-    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-
-    // Reuse already-downloaded audio from a prior transpose(semitones=0) request if available
-    const transposeCacheKey = `${url}::0::p`;
-    const cachedAudioPath = transposeCache.has(transposeCacheKey)
-      ? transposeCache.get(transposeCacheKey)
-      : null;
-    const reusingCached = cachedAudioPath && fs.existsSync(cachedAudioPath);
-
-    let audioPath;
-    if (reusingCached) {
-      audioPath = cachedAudioPath;
-    } else {
-      audioPath = path.join(tmpDir, `${uuidv4()}.wav`);
-      await downloadAudio(url, audioPath);
-    }
+    // Reuse the decoded source audio cached per URL (shared with transpose).
+    // Do not delete it here — it stays cached for subsequent requests.
+    const audioPath = await getSourceAudio(url);
 
     let keyResult = "";
-    try {
-      await new Promise((resolve, reject) => {
-        execFile(
-          deps.pythonBin,
-          [path.join(__dirname, "detect_key.py"), audioPath],
-          { env: process.env, timeout: PYTHON_TIMEOUT_MS },
-          (err, stdout, stderr) => {
-            keyResult = stdout.trim();
-            if (err) return reject(new Error(stderr || err));
-            resolve();
-          },
-        );
-      });
-    } finally {
-      if (!reusingCached) safeUnlink(audioPath);
-    }
+    await new Promise((resolve, reject) => {
+      execFile(
+        deps.pythonBin,
+        [path.join(__dirname, "detect_key.py"), audioPath],
+        { env: process.env, timeout: PYTHON_TIMEOUT_MS },
+        (err, stdout, stderr) => {
+          keyResult = stdout.trim();
+          if (err) return reject(new Error(stderr || err));
+          resolve();
+        },
+      );
+    });
     if (!keyResult) throw new Error("Key detection returned empty result");
     keyCache.set(url, keyResult);
     return keyResult;
@@ -653,54 +685,34 @@ app.post("/api/youtube-transpose", async (req, res) => {
   const jobPromise = (async () => {
     const id = uuidv4();
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-    const audioPath = path.join(tmpDir, `${id}.wav`);
     const outPath = path.join(tmpDir, `${id}-out.wav`);
 
-    try {
-      await downloadAudio(url, audioPath);
+    // Cached, decoded source PCM (downloaded once per URL). Never unlinked here.
+    const srcPath = await getSourceAudio(url);
 
-      if (semitoneNum !== 0 || isTempo) {
-        // Convert to 16-bit PCM WAV for rubberband compatibility
-        const pcmPath = path.join(tmpDir, `${id}-pcm.wav`);
-        await new Promise((resolve, reject) => {
-          execFile(
-            "ffmpeg",
-            ["-y", "-i", audioPath, "-acodec", "pcm_s16le", "-ar", "44100", pcmPath],
-            { timeout: 30000 },
-            (err, _stdout, stderr) => {
-              if (err) return reject(new Error(stderr || err));
-              try { fs.unlinkSync(audioPath); } catch {}
-              try { fs.renameSync(pcmPath, audioPath); } catch (e) { return reject(e); }
-              resolve();
-            },
-          );
-        });
-
-        const timeRatio = (1 / Math.pow(2, semitoneNum / 12)).toFixed(6);
-        const rbArgs = ["-R", "--formant", "--ignore-clipping"];
-        if (isTempo) {
-          rbArgs.push("-t", timeRatio);
-        } else {
-          rbArgs.push("-p", semitoneNum.toString());
-        }
-        rbArgs.push(audioPath, outPath);
-        await new Promise((resolve, reject) => {
-          execFile(
-            "rubberband",
-            rbArgs,
-            { timeout: RUBBERBAND_TIMEOUT_MS },
-            (err, _stdout, stderr) => {
-              if (err) return reject(new Error(stderr || err));
-              resolve();
-            },
-          );
-        });
+    if (semitoneNum !== 0 || isTempo) {
+      const timeRatio = (1 / Math.pow(2, semitoneNum / 12)).toFixed(6);
+      const rbArgs = ["-R", "--formant", "--ignore-clipping"];
+      if (isTempo) {
+        rbArgs.push("-t", timeRatio);
       } else {
-        // No pitch/tempo change — skip PCM conversion entirely
-        fs.copyFileSync(audioPath, outPath);
+        rbArgs.push("-p", semitoneNum.toString());
       }
-    } finally {
-      safeUnlink(audioPath);
+      rbArgs.push(srcPath, outPath);
+      await new Promise((resolve, reject) => {
+        execFile(
+          "rubberband",
+          rbArgs,
+          { timeout: RUBBERBAND_TIMEOUT_MS },
+          (err, _stdout, stderr) => {
+            if (err) return reject(new Error(stderr || err));
+            resolve();
+          },
+        );
+      });
+    } else {
+      // No pitch/tempo change — serve a copy of the source PCM
+      fs.copyFileSync(srcPath, outPath);
     }
 
     transposeCache.set(cacheKey, outPath);
