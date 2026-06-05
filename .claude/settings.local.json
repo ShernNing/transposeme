@@ -61,7 +61,15 @@
       "Bash(npx eslint *)",
       "Bash(git -C /Users/shernningtan/Documents/Codes/Code/transposeme blame -L 610,615 src/App.jsx)",
       "Bash(npm uninstall *)",
-      "Bash(node -c index.cjs)"
+      "Bash(node -c index.cjs)",
+      "Bash(gh repo *)",
+      "Bash(node --test server/server_units.test.cjs)",
+      "Bash(npm test *)",
+      "Bash(node --test src/utils/keyUtils.test.js)",
+      "Bash(grep -n \"exhaustive-deps\\\\|appliedSemitones,\\\\$\\\\|runYouTubeTranspose,\\\\|debounceRef,\\\\$\\\\|showNotice,\" src/App.jsx)",
+      "Bash(node -c server/index.cjs)",
+      "Bash(grep -E 'cookies.txt|^\\\\.env$')",
+      "Bash(git check-ignore *)"
     ]
   }
 }

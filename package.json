@@ -9,6 +9,7 @@
     "dev:server": "node server/index.cjs",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:server\"",
     "build": "vite build",
+    "test": "node --test src/utils/keyUtils.test.js server/server_units.test.cjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "electron": "electron .",

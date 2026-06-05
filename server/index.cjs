@@ -82,10 +82,12 @@ async function printDependencyErrors(results) {
   }
 }
 
-(async () => {
-  const depResults = await checkAllDependencies();
-  await printDependencyErrors(depResults);
-})();
+if (require.main === module) {
+  (async () => {
+    const depResults = await checkAllDependencies();
+    await printDependencyErrors(depResults);
+  })();
+}
 const cors = require("cors");
 const helmet = require("helmet");
 const fs = require("fs");
@@ -108,19 +110,33 @@ const CACHE_MAX_SIZE = parseInt(process.env.MAX_CACHE_SIZE || "100", 10);
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 class BoundedCache {
-  constructor(maxSize, ttlMs) {
+  // onEvict(value) runs when an entry is dropped (TTL expiry, LRU eviction, or
+  // overwrite). Caches that store temp-file paths pass safeUnlink here so the
+  // file is deleted from disk instead of leaking until the 6h sweep.
+  constructor(maxSize, ttlMs, onEvict) {
     this.maxSize = maxSize;
     this.ttlMs = ttlMs;
+    this.onEvict = onEvict;
     this.map = new Map();
   }
   _isExpired(entry) {
     return Date.now() - entry.ts > this.ttlMs;
+  }
+  _evict(value) {
+    if (this.onEvict) {
+      try {
+        this.onEvict(value);
+      } catch {
+        /* best-effort cleanup */
+      }
+    }
   }
   get(key) {
     const entry = this.map.get(key);
     if (!entry) return undefined;
     if (this._isExpired(entry)) {
       this.map.delete(key);
+      this._evict(entry.value);
       return undefined;
     }
     return entry.value;
@@ -129,22 +145,32 @@ class BoundedCache {
     return this.get(key) !== undefined;
   }
   set(key, value) {
-    if (this.map.has(key))
+    const existing = this.map.get(key);
+    if (existing) {
       this.map.delete(key); // refresh insertion order
-    else if (this.map.size >= this.maxSize) {
+      if (existing.value !== value) this._evict(existing.value);
+    } else if (this.map.size >= this.maxSize) {
       // evict oldest entry
-      this.map.delete(this.map.keys().next().value);
+      const oldestKey = this.map.keys().next().value;
+      const oldest = this.map.get(oldestKey);
+      this.map.delete(oldestKey);
+      this._evict(oldest.value);
     }
     this.map.set(key, { value, ts: Date.now() });
   }
 }
 
-const transposeCache = new BoundedCache(CACHE_MAX_SIZE, CACHE_TTL_MS);
+// transposeCache and sourceCache store temp-file paths — unlink on eviction.
+const transposeCache = new BoundedCache(CACHE_MAX_SIZE, CACHE_TTL_MS, (p) =>
+  safeUnlink(p),
+);
 const keyCache = new BoundedCache(CACHE_MAX_SIZE, CACHE_TTL_MS);
 // Decoded source audio (PCM 16le 44.1k wav) cached per URL — downloaded + decoded
 // once, then reused for every transpose/key request. Avoids re-downloading the
 // same video for each semitone change.
-const sourceCache = new BoundedCache(CACHE_MAX_SIZE, CACHE_TTL_MS);
+const sourceCache = new BoundedCache(CACHE_MAX_SIZE, CACHE_TTL_MS, (p) =>
+  safeUnlink(p),
+);
 const requestHits = new Map();
 // In-flight job deduplication: jobKey -> Promise
 const pendingJobs = new Map();
@@ -162,15 +188,19 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json({ limit: "10kb" }));
 
-// Log environment info at startup (mask sensitive values)
+// Log a safe allowlist of env vars at startup. Never dump full process.env —
+// it leaks secrets (cookies path, API keys, tokens) into logs.
 function logEnv() {
-  const env = { ...process.env };
-  if (env.PATH) env.PATH = env.PATH.split(":").slice(0, 3).join(":") + "...";
-  if (env.NODE_BINARY) env.NODE_BINARY = "[set]";
-  if (env.IS_BACKEND) env.IS_BACKEND = "[set]";
-  console.log("[startup] Environment:", env);
+  const SAFE_KEYS = ["NODE_ENV", "PORT", "CORS_ORIGIN", "COOKIES_PATH"];
+  const safe = {};
+  for (const k of SAFE_KEYS) {
+    if (process.env[k] != null) safe[k] = process.env[k];
+  }
+  if (process.env.PATH)
+    safe.PATH = process.env.PATH.split(":").slice(0, 3).join(":") + "...";
+  console.log("[startup] Environment:", safe);
 }
-logEnv();
+if (require.main === module) logEnv();
 
 // Request logging middleware (detailed)
 app.use((req, res, next) => {
@@ -204,7 +234,7 @@ function cleanupTmpDir() {
     });
   });
 }
-setInterval(cleanupTmpDir, 60 * 60 * 1000); // every hour
+setInterval(cleanupTmpDir, 60 * 60 * 1000).unref(); // every hour
 
 // Periodically prune stale IPs from the rate-limit map
 setInterval(() => {
@@ -214,7 +244,7 @@ setInterval(() => {
     if (recent.length === 0) requestHits.delete(ip);
     else requestHits.set(ip, recent);
   }
-}, REQUEST_WINDOW_MS);
+}, REQUEST_WINDOW_MS).unref();
 
 // Add a root route for GET / with API info
 app.get("/", (_req, res) => {
@@ -736,30 +766,8 @@ app.post("/api/youtube-transpose", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 4000;
-const server = app.listen(PORT, async () => {
-  console.log(`Server running on port ${PORT}`);
-  const deps = await getDependencyStatus();
-  if (!deps.ytDlpOk) {
-    console.warn("Dependency missing: yt-dlp");
-  }
-  if (!deps.rubberbandOk) {
-    console.warn("Dependency missing: rubberband");
-  }
-  if (!deps.ffmpegOk) {
-    console.warn("Dependency missing: ffmpeg");
-  }
-  if (!deps.pythonOk) {
-    console.warn("Dependency missing: python3");
-  } else if (!deps.essentiaOk) {
-    console.warn(
-      "Python module missing: essentia (youtube-key endpoint will fail)",
-    );
-  }
-});
-
 // Graceful shutdown
-function shutdown(signal) {
+function shutdown(server, signal) {
   console.log(`\nReceived ${signal}. Shutting down gracefully...`);
   server.close(() => {
     console.log("Closed out remaining connections.");
@@ -781,5 +789,32 @@ function shutdown(signal) {
   }, 10000);
 }
 
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
+// Only boot the HTTP server when run directly (not when imported by tests).
+if (require.main === module) {
+  const PORT = process.env.PORT || 4000;
+  const server = app.listen(PORT, async () => {
+    console.log(`Server running on port ${PORT}`);
+    const deps = await getDependencyStatus();
+    if (!deps.ytDlpOk) {
+      console.warn("Dependency missing: yt-dlp");
+    }
+    if (!deps.rubberbandOk) {
+      console.warn("Dependency missing: rubberband");
+    }
+    if (!deps.ffmpegOk) {
+      console.warn("Dependency missing: ffmpeg");
+    }
+    if (!deps.pythonOk) {
+      console.warn("Dependency missing: python3");
+    } else if (!deps.essentiaOk) {
+      console.warn(
+        "Python module missing: essentia (youtube-key endpoint will fail)",
+      );
+    }
+  });
+
+  process.on("SIGINT", () => shutdown(server, "SIGINT"));
+  process.on("SIGTERM", () => shutdown(server, "SIGTERM"));
+}
+
+module.exports = { app, BoundedCache, isValidYouTubeUrl };

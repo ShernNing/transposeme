@@ -1,4 +1,4 @@
-import { CHROMATIC_NOTES, CHROMATIC_NOTES_FLAT, NOTE_TO_INDEX } from "./constants";
+import { CHROMATIC_NOTES, CHROMATIC_NOTES_FLAT, NOTE_TO_INDEX } from "./constants.js";
 
 export function transposeDetectedKey(keyLabel, semitoneShift) {
   if (!keyLabel) return "";

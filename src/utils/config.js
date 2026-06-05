@@ -23,6 +23,7 @@ export const CONFIG = {
 
   // UI
   NOTICE_DURATION_MS: 2_800,
+  SLOW_TRANSPOSE_NOTICE_MS: 30_000, // show "taking longer" hint after this delay
   PLAYBACK_RATES: [0.5, 0.75, 1, 1.25, 1.5, 2],
 
   // Rate limiting

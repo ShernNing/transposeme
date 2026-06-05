@@ -27,6 +27,7 @@ import useAudioContext from "./hooks/useAudioContext";
 import useProcessedHistory from "./hooks/useProcessedHistory";
 import useYouTubeTranspose from "./hooks/useYouTubeTranspose";
 import useAnimatedDots from "./hooks/useAnimatedDots";
+import useTransposeState from "./hooks/useTransposeState";
 import ProgressBar from "./components/ProgressBar";
 
 import { isAudio } from "./utils/audioUtils";
@@ -43,7 +44,16 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 function App() {
   // --- Core state ---
   const [appError, setAppError] = useState("");
-  const [semitones, setSemitones] = useState(0);
+  const {
+    semitones,
+    appliedSemitones,
+    pendingSemitones,
+    queuedDelta,
+    setSemitones,
+    setAppliedSemitones,
+    setPendingSemitones,
+    setQueuedDelta,
+  } = useTransposeState();
   const [outputFormat, setOutputFormat] = useState(OUTPUT_FORMATS[0]);
   const [transposedSrc, setTransposedSrc] = useState(null);
   const [originalSrc, setOriginalSrc] = useState(null);
@@ -52,9 +62,6 @@ function App() {
   const [useWasm, setUseWasm] = useState(true);
   const [showOriginalYouTube, setShowOriginalYouTube] = useState(true);
   const [showOriginalAB, setShowOriginalAB] = useState(false);
-  const [appliedSemitones, setAppliedSemitones] = useState(0);
-  const [pendingSemitones, setPendingSemitones] = useState(null);
-  const [queuedDelta, setQueuedDelta] = useState(0);
   const [notice, setNotice] = useState(null);
   const [tempoMode, setTempoMode] = useState(false);
   const [fileReadStatus, setFileReadStatus] = useState("");
@@ -186,7 +193,7 @@ function App() {
       setShowSlowTransposeNote(false);
       slowTransposeTimerRef.current = setTimeout(
         () => setShowSlowTransposeNote(true),
-        30000,
+        CONFIG.SLOW_TRANSPOSE_NOTICE_MS,
       );
     } else {
       setShowSlowTransposeNote(false);
@@ -303,6 +310,56 @@ function App() {
     [API_BASE_URL],
   );
 
+  // Wire a freshly-processed file blob into player + history + key analysis.
+  // Shared by the WASM and server-side branches of handleFileSelect.
+  const finalizeProcessed = useCallback(
+    async (blob, f, { setOriginal = false } = {}) => {
+      const type = isVideo(f) ? "video" : "audio";
+      setTransposedFromBlob(blob);
+      if (setOriginal) setOriginalSrc(URL.createObjectURL(blob));
+      setAppliedSemitones(0);
+      setPlaying(true);
+      const meta = await extractMetadata(blob, type);
+      addProcessedItem({
+        id: `${f.name}::0`,
+        type,
+        label: f.name,
+        title: f.name,
+        blob,
+        semitones: 0,
+        isYouTube: false,
+        fileName: f.name,
+        metadata: meta,
+      });
+      analyzeFileKey(blob, f.name.replace(/\.[^.]+$/, "") + ".wav");
+    },
+    [
+      setTransposedFromBlob,
+      setAppliedSemitones,
+      addProcessedItem,
+      analyzeFileKey,
+    ],
+  );
+
+  // Apply a transpose result to the player without touching history.
+  // Shared by the WASM and server-side branches of runTranspose.
+  const applyTransposeResult = useCallback(
+    (blob, newSemitones, currentTime) => {
+      setTransposedFromBlob(blob);
+      setAppliedSemitones(newSemitones);
+      setPendingSemitones(null);
+      setQueuedDelta(0);
+      setSeekTo(currentTime);
+      setPlaying(true);
+    },
+    [
+      setTransposedFromBlob,
+      setAppliedSemitones,
+      setPendingSemitones,
+      setQueuedDelta,
+    ],
+  );
+
   // --- Handler: File upload ---
   const handleFileSelect = useCallback(
     async (f) => {
@@ -333,48 +390,11 @@ function App() {
             throw e;
           }
           setTimeout(() => setWasmProgress(0), 500);
-          setTransposedFromBlob(blob);
-          setOriginalSrc(URL.createObjectURL(blob));
-          setAppliedSemitones(0);
-          setPlaying(true);
-          const meta = await extractMetadata(
-            blob,
-            isVideo(f) ? "video" : "audio",
-          );
-          addProcessedItem({
-            id: `${f.name}::0`,
-            type: isVideo(f) ? "video" : "audio",
-            label: f.name,
-            title: f.name,
-            blob,
-            semitones: 0,
-            isYouTube: false,
-            fileName: f.name,
-            metadata: meta,
-          });
-          analyzeFileKey(blob, f.name.replace(/\.[^.]+$/, "") + ".wav");
+          await finalizeProcessed(blob, f, { setOriginal: true });
         } else {
           const result = await transpose(f, 0, isAudio(f) ? "audio" : "video");
           if (result) {
-            setTransposedFromBlob(result);
-            setAppliedSemitones(0);
-            setPlaying(true);
-            const meta = await extractMetadata(
-              result,
-              isAudio(f) ? "audio" : "video",
-            );
-            addProcessedItem({
-              id: `${f.name}::0`,
-              type: isAudio(f) ? "audio" : "video",
-              label: f.name,
-              title: f.name,
-              blob: result,
-              semitones: 0,
-              isYouTube: false,
-              fileName: f.name,
-              metadata: meta,
-            });
-            analyzeFileKey(result, f.name.replace(/\.[^.]+$/, "") + ".wav");
+            await finalizeProcessed(result, f);
           }
         }
       } catch (e) {
@@ -390,12 +410,13 @@ function App() {
       useWasm,
       runWasmTranspose,
       transpose,
-      setTransposedFromBlob,
+      finalizeProcessed,
       setFile,
       setYoutubeUrl,
       setYoutubeKey,
-      addProcessedItem,
-      analyzeFileKey,
+      setSemitones,
+      setPendingSemitones,
+      setAppliedSemitones,
     ],
   );
 
@@ -417,12 +438,7 @@ function App() {
         if (useWasm && (isAudio(file) || isVideo(file))) {
           const blob = await runWasmTranspose(file, newSemitones);
           setTimeout(() => setWasmProgress(0), 500);
-          setTransposedFromBlob(blob);
-          setAppliedSemitones(newSemitones);
-          setPendingSemitones(null);
-          setQueuedDelta(0);
-          setSeekTo(currentTime);
-          setPlaying(true);
+          applyTransposeResult(blob, newSemitones, currentTime);
         } else {
           const result = await transpose(
             file,
@@ -430,12 +446,7 @@ function App() {
             isAudio(file) ? "audio" : "video",
           );
           if (result) {
-            setTransposedFromBlob(result);
-            setAppliedSemitones(newSemitones);
-            setPendingSemitones(null);
-            setQueuedDelta(0);
-            setSeekTo(currentTime);
-            setPlaying(true);
+            applyTransposeResult(result, newSemitones, currentTime);
           }
         }
       } catch (e) {
@@ -451,7 +462,7 @@ function App() {
       runWasmTranspose,
       transpose,
       runYouTubeTranspose,
-      setTransposedFromBlob,
+      applyTransposeResult,
     ],
   );
 
@@ -477,6 +488,9 @@ function App() {
       isProcessingYouTube,
       debounceRef,
       runTranspose,
+      setSemitones,
+      setPendingSemitones,
+      setQueuedDelta,
     ],
   );
 
@@ -575,6 +589,9 @@ function App() {
       setFile,
       setYoutubeUrl,
       setYoutubeKey,
+      setSemitones,
+      setAppliedSemitones,
+      setPendingSemitones,
     ],
   );
 
@@ -591,7 +608,7 @@ function App() {
       file?.name?.replace(/\.[^.]+$/, "") ||
       "transposed";
     const safeName = rawTitle
-      .replace(/[^a-z0-9_\-]/gi, "_")
+      .replace(/[^a-z0-9_-]/gi, "_")
       .replace(/_+/g, "_")
       .slice(0, 48);
     const stLabel =
@@ -684,19 +701,7 @@ function App() {
           instantly.
         </p>
         {showSlowTransposeNote && (
-          <div
-            style={{
-              margin: "12px auto",
-              maxWidth: "600px",
-              padding: "12px 16px",
-              borderRadius: 8,
-              background: "#2d3748",
-              border: "1px solid #4a5568",
-              color: "#f6e05e",
-              fontSize: 13,
-              fontWeight: 500,
-            }}
-          >
+          <div className='slow-transpose-note'>
             ⏱️ This transpose is taking longer than expected. Due to server
             bottlenecks, it may take 1 to 5 minutes to complete.
           </div>
@@ -776,21 +781,18 @@ function App() {
           />
 
           {(youtubeUrl || (file && activeKey)) && (
-            <div
-              style={{
-                textAlign: "center",
-                marginBottom: 8,
-                fontSize: 13,
-                color: "#cbd5e0",
-              }}
-            >
-              <span style={{ marginRight: 12 }}>
+            <div className='key-display'>
+              <span className='key-display-original'>
                 Original key:{" "}
-                <span style={{ color: "#90cdf4" }}>{originalKeyLabel}</span>
+                <span className='key-display-original-value'>
+                  {originalKeyLabel}
+                </span>
               </span>
               <span>
                 Current key:{" "}
-                <span style={{ color: "#9ae6b4" }}>{currentKeyLabel}</span>
+                <span className='key-display-current-value'>
+                  {currentKeyLabel}
+                </span>
               </span>
             </div>
           )}
@@ -838,35 +840,17 @@ function App() {
 
           <Notice notice={notice} />
           {fileReadStatus && wasmProgress === 0 && (
-            <div
-              style={{
-                textAlign: "center",
-                color: "#f6e05e",
-                fontSize: 13,
-                marginBottom: 6,
-              }}
-            >
-              {fileReadStatus}
-            </div>
+            <div className='file-read-status'>{fileReadStatus}</div>
           )}
           <ErrorDisplay error={appError || fileError || transError} />
 
           {appError && youtubeUrl && !isProcessingYouTube && (
-            <div style={{ textAlign: "center", marginBottom: 8 }}>
+            <div className='center-row'>
               <button
+                className='retry-btn'
                 onClick={() => {
                   setAppError("");
                   runTranspose(semitones);
-                }}
-                style={{
-                  background: "#3182ce",
-                  color: "#fff",
-                  fontWeight: 700,
-                  border: "none",
-                  borderRadius: 6,
-                  padding: "7px 20px",
-                  cursor: "pointer",
-                  fontSize: 14,
                 }}
               >
                 Retry
@@ -877,14 +861,14 @@ function App() {
           {(file || youtubeUrl) && (
             <>
               {!youtubeUrl && (
-                <div style={{ textAlign: "center", marginBottom: 8 }}>
-                  <label style={{ color: "#fff", marginRight: 8 }}>
+                <div className='center-row'>
+                  <label className='wasm-toggle-label'>
                     <input
                       type='checkbox'
+                      className='wasm-toggle-checkbox'
                       checked={useWasm}
                       onChange={(e) => setUseWasm(e.target.checked)}
                       disabled={processing}
-                      style={{ marginRight: 4 }}
                     />
                     Use in-browser (WASM) transposition
                   </label>
@@ -892,15 +876,7 @@ function App() {
               )}
 
               {youtubeUrl && !isProcessingYouTube && (
-                <div
-                  style={{
-                    textAlign: "center",
-                    fontSize: 12,
-                    color: "#a0aec0",
-                    marginTop: 2,
-                    marginBottom: 8,
-                  }}
-                >
+                <div className='transpose-tip'>
                   Tip: use +/− for quick transpose previews; latest request is
                   applied.
                 </div>
@@ -919,19 +895,10 @@ function App() {
 
               <ChordSheet keyLabel={currentKeyLabel} />
 
-              <div style={{ textAlign: "center", marginTop: 8 }}>
+              <div className='chord-doc-toggle-row'>
                 <button
+                  className={`chord-doc-toggle-btn${showChordDoc ? " open" : ""}`}
                   onClick={() => setShowChordDoc((v) => !v)}
-                  style={{
-                    background: showChordDoc ? "#4a5568" : "#2d3748",
-                    color: "#f6e05e",
-                    border: "1px solid #4a5568",
-                    borderRadius: 6,
-                    padding: "6px 18px",
-                    fontSize: 14,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
                 >
                   {showChordDoc
                     ? "Hide Chord Sheet Generator ▲"
@@ -964,18 +931,9 @@ function App() {
           <FAQ />
         </div>
       </main>
-      <footer
-        style={{
-          textAlign: "center",
-          color: "#4a5568",
-          fontSize: 12,
-          padding: "16px 0",
-        }}
-      >
-        <div style={{ marginBottom: 8 }}>
-          {/* <span style={{ color: "#718096", marginRight: 8 }}>Apps:</span> */}
+      <footer className='app-footer'>
+        <div className='app-footer-inner'>
           {[
-            // { label: "TransposeMe", url: "https://transposeme.vercel.app/" },
             { label: "Chord Vault", url: "https://chordvault-ten.vercel.app/" },
             {
               label: "Workout Tracker",
@@ -984,18 +942,10 @@ function App() {
           ].map(({ label, url }) => (
             <a
               key={label}
+              className='app-footer-link'
               href={url}
               target='_blank'
               rel='noopener noreferrer'
-              style={{
-                color: "#667eea",
-                textDecoration: "none",
-                marginRight: 12,
-              }}
-              onMouseEnter={(e) =>
-                (e.target.style.textDecoration = "underline")
-              }
-              onMouseLeave={(e) => (e.target.style.textDecoration = "none")}
             >
               {label}
             </a>
