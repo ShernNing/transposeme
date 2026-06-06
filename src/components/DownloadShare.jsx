@@ -8,7 +8,7 @@ const DownloadShare = ({ onDownload, onShare, disabled, formats, selectedFormat,
       {formats.map(fmt => <option key={fmt} value={fmt}>{fmt.toUpperCase()}</option>)}
     </select>
     <Magnetic>
-      <button onClick={onDownload} disabled={disabled} className="shimmer-btn">Download</button>
+      <button onClick={onDownload} disabled={disabled}>Download</button>
     </Magnetic>
     <button onClick={onShare} disabled={disabled}>Share</button>
   </div>

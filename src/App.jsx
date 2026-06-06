@@ -39,7 +39,6 @@ import { CONFIG } from "./utils/config";
 import AuroraBackground from "./components/fx/AuroraBackground";
 import ParticleField from "./components/fx/ParticleField";
 import { ShinyTitle, Typewriter } from "./components/fx/HeroText";
-import LampGlow from "./components/fx/LampGlow";
 import AnimatedValue from "./components/fx/AnimatedValue";
 import BorderBeam from "./components/fx/BorderBeam";
 import MultiStepLoader from "./components/fx/MultiStepLoader";
@@ -708,7 +707,6 @@ function App() {
       <AuroraBackground paused={processing || isProcessingYouTube} />
       <ParticleField paused={processing || isProcessingYouTube} />
       <main className='app-shell'>
-        <LampGlow />
         <ShinyTitle>TransposeMe</ShinyTitle>
         <Typewriter text='Shift pitch & tempo of YouTube videos and audio files — locally, instantly.' />
         {showSlowTransposeNote && (
