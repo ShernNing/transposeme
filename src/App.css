@@ -622,14 +622,17 @@ input[type="range"]::-moz-range-thumb {
   50% { opacity: 0; }
 }
 
-/* --- Glass card glow-up --- */
+/* --- Glass card glow-up + cursor spotlight --- */
 .app-card {
   position: relative;
-  background: linear-gradient(
-    180deg,
-    rgba(18, 24, 42, 0.78),
-    rgba(10, 14, 26, 0.82)
-  );
+  background:
+    radial-gradient(
+      400px circle at var(--spot-x, -300px) var(--spot-y, -300px),
+      rgba(102, 217, 163, 0.1),
+      rgba(144, 205, 244, 0.05) 35%,
+      transparent 65%
+    ),
+    linear-gradient(180deg, rgba(18, 24, 42, 0.78), rgba(10, 14, 26, 0.82));
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow:
     0 24px 60px rgba(0, 0, 0, 0.45),
@@ -783,6 +786,29 @@ button:not(:disabled):hover::after {
   left: 140%;
 }
 
+/* --- Shimmer primary CTA buttons (magicui-style) --- */
+.shimmer-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    110deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.28) 50%,
+    transparent 70%
+  );
+  background-size: 220% 100%;
+  animation: btn-shimmer 3s linear infinite;
+  pointer-events: none;
+  z-index: 1;
+}
+.shimmer-btn:disabled::before { display: none; }
+@keyframes btn-shimmer {
+  0% { background-position: 220% 0; }
+  100% { background-position: -120% 0; }
+}
+
 /* --- Empty-state steps: subtle glow on hover --- */
 .empty-state-step {
   transition: transform 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
@@ -798,8 +824,10 @@ button:not(:disabled):hover::after {
   .shiny-title,
   .type-caret,
   .border-beam,
-  .progress-bar::after {
+  .progress-bar::after,
+  .shimmer-btn::before {
     animation: none !important;
   }
+  .shimmer-btn::before { display: none; }
   button:not(:disabled)::after { transition: none; }
 }

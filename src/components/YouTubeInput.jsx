@@ -72,7 +72,7 @@ const YouTubeInput = ({ onSubmit, disabled }) => {
           Please enter a valid YouTube URL (youtube.com, youtu.be, youtube Shorts or Music)
         </div>
       )}
-      <button type="submit" disabled={!canSubmit} className="youtube-submit-btn">
+      <button type="submit" disabled={!canSubmit} className="youtube-submit-btn shimmer-btn">
         Load
       </button>
     </form>

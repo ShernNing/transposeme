@@ -37,6 +37,7 @@ import { remuxVideoWithAudio, releaseFFmpeg } from "./utils/videoRemuxer";
 import { transposeDetectedKey } from "./utils/keyUtils";
 import { CONFIG } from "./utils/config";
 import AuroraBackground from "./components/fx/AuroraBackground";
+import ParticleField from "./components/fx/ParticleField";
 import { ShinyTitle, Typewriter } from "./components/fx/HeroText";
 import BorderBeam from "./components/fx/BorderBeam";
 import MultiStepLoader from "./components/fx/MultiStepLoader";
@@ -703,6 +704,7 @@ function App() {
   return (
     <div className='App'>
       <AuroraBackground paused={processing || isProcessingYouTube} />
+      <ParticleField paused={processing || isProcessingYouTube} />
       <main className='app-shell'>
         <ShinyTitle>TransposeMe</ShinyTitle>
         <Typewriter text='Shift pitch & tempo of YouTube videos and audio files — locally, instantly.' />
@@ -714,6 +716,11 @@ function App() {
         )}
         <div
           className={`app-card${processing || isProcessingYouTube ? " is-processing" : ""}`}
+          onMouseMove={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            e.currentTarget.style.setProperty("--spot-x", `${e.clientX - rect.left}px`);
+            e.currentTarget.style.setProperty("--spot-y", `${e.clientY - rect.top}px`);
+          }}
         >
           {(processing || isProcessingYouTube) && <BorderBeam />}
           <ProcessedHistory

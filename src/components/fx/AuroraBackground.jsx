@@ -51,16 +51,23 @@ void main(){
   vec2 uv = gl_FragCoord.xy / uResolution.xy;
   vec2 p = uv;
   p.x *= uResolution.x / uResolution.y;
-  float t = uTime * 0.05;
-  float n  = fbm(p * 2.2 + vec2(t, t * 0.4));
-  float n2 = fbm(p * 3.4 - vec2(t * 0.6, t));
-  float m1 = smoothstep(0.0, 1.0, n  * 0.5 + 0.5);
-  float m2 = smoothstep(0.0, 1.0, n2 * 0.5 + 0.5);
-  vec3 col = mix(uColorA, uColorB, m1);
-  col = mix(col, uColorC, m2 * 0.5);
-  // concentrate glow toward the top (uv.y ~1), fade to dark base at the bottom
-  float topGlow = smoothstep(-0.15, 1.0, uv.y);
-  col = mix(uBase, col, clamp(0.12 + 0.45 * m1 * topGlow + 0.32 * topGlow, 0.0, 1.0));
+  float t = uTime * 0.07;
+
+  // iq-style domain warping → silky, flowing aurora curtains
+  vec2 q = vec2(fbm(p * 1.2 + vec2(0.0, t)),
+                fbm(p * 1.2 + vec2(5.2, -t)));
+  vec2 r = vec2(fbm(p * 1.2 + 1.7 * q + vec2(1.7 - t * 0.4, 9.2)),
+                fbm(p * 1.2 + 1.7 * q + vec2(8.3, 2.8 + t * 0.5)));
+  float n = fbm(p * 1.2 + 1.6 * r);
+  float f = clamp(n * 0.5 + 0.5, 0.0, 1.0);
+
+  vec3 col = mix(uColorA, uColorB, smoothstep(0.1, 0.85, f));
+  col = mix(col, uColorC, clamp(length(r) * 0.6, 0.0, 1.0));
+  col += vec3(0.05, 0.08, 0.10) * pow(f, 3.0); // silky highlights
+
+  // glow concentrated up top, deep dark toward the bottom
+  float topGlow = smoothstep(-0.25, 1.05, uv.y);
+  col = mix(uBase, col, clamp(0.04 + 0.72 * f * topGlow + 0.12 * topGlow, 0.0, 1.0));
   col *= uIntensity;
   gl_FragColor = vec4(col, 1.0);
 }
@@ -68,11 +75,11 @@ void main(){
 
 export default function AuroraBackground({
   paused = false,
-  intensity = 0.92,
-  colorA = [0.176, 0.106, 0.412], // #2d1b69 purple
-  colorB = [0.09, 0.22, 0.4], // #173866 blue
-  colorC = [0.1, 0.45, 0.36], // teal/green accent
-  base = [0.035, 0.043, 0.071], // #090b12
+  intensity = 1.0,
+  colorA = [0.231, 0.122, 0.478], // #3b1f7a violet
+  colorB = [0.055, 0.302, 0.549], // #0e4d8c blue
+  colorC = [0.059, 0.42, 0.341], // #0f6b57 teal-green accent
+  base = [0.024, 0.027, 0.051], // #06070d near-black
 }) {
   const ref = useRef(null);
   const ctrl = useRef(null); // { start, stop } — exposed by the setup effect

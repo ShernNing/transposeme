@@ -6,7 +6,7 @@ const DownloadShare = ({ onDownload, onShare, disabled, formats, selectedFormat,
     <select className="download-share-select" value={selectedFormat} onChange={e => onFormatChange(e.target.value)} disabled={disabled}>
       {formats.map(fmt => <option key={fmt} value={fmt}>{fmt.toUpperCase()}</option>)}
     </select>
-    <button onClick={onDownload} disabled={disabled}>Download</button>
+    <button onClick={onDownload} disabled={disabled} className="shimmer-btn">Download</button>
     <button onClick={onShare} disabled={disabled}>Share</button>
   </div>
 );
