@@ -69,7 +69,9 @@
       "Bash(grep -n \"exhaustive-deps\\\\|appliedSemitones,\\\\$\\\\|runYouTubeTranspose,\\\\|debounceRef,\\\\$\\\\|showNotice,\" src/App.jsx)",
       "Bash(node -c server/index.cjs)",
       "Bash(grep -E 'cookies.txt|^\\\\.env$')",
-      "Bash(git check-ignore *)"
+      "Bash(git check-ignore *)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(pkill -f \"vite\")"
     ]
   }
 }

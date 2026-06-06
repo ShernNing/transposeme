@@ -760,82 +760,152 @@ function App() {
             />
           )}
 
-          <PlayerSection
-            file={file}
-            youtubeUrl={youtubeUrl}
-            transposedSrc={transposedSrc}
-            originalSrc={originalSrc}
-            playing={playing}
-            setPlaying={setPlaying}
-            processing={processing}
-            isProcessingYouTube={isProcessingYouTube}
-            seekTo={seekTo}
-            semitones={semitones}
-            appliedSemitones={appliedSemitones}
-            processedItems={processedItems}
-            controlsDisabled={processing || isProcessingYouTube}
-            youtubeKey={youtubeKey}
-            mediaRef={playerRef}
-            showOriginal={showOriginalAB}
-            setShowOriginal={setShowOriginalAB}
-          />
-
-          {(youtubeUrl || (file && activeKey)) && (
-            <div className='key-display'>
-              <span className='key-display-original'>
-                Original key:{" "}
-                <span className='key-display-original-value'>
-                  {originalKeyLabel}
-                </span>
-              </span>
-              <span>
-                Current key:{" "}
-                <span className='key-display-current-value'>
-                  {currentKeyLabel}
-                </span>
-              </span>
-            </div>
-          )}
-
-          <YouTubeKeyAnalysis
-            youtubeUrl={youtubeUrl}
-            file={file}
-            isAnalyzingKey={isAnalyzingKey || isAnalyzingFileKey}
-            isProcessingYouTube={isProcessingYouTube}
-            handleAnalyzeKey={
-              youtubeUrl ? handleAnalyzeKey : () => analyzeFileKey(file)
-            }
-            handleReanalyzeKey={
-              youtubeUrl ? () => handleAnalyzeKey() : () => analyzeFileKey(file)
-            }
-            keyFeedback={keyFeedback}
-            keyAnalyzeDots={keyAnalyzeDots}
-            youtubeKey={activeKey}
-          >
-            <KeySelector
-              youtubeKey={activeKey}
-              appliedSemitones={appliedSemitones}
-              processing={processing || isAnalyzingFileKey}
-              isProcessingYouTube={isProcessingYouTube}
-              handleTranspose={handleTranspose}
-              processedItems={processedItems}
-              youtubeUrl={youtubeUrl}
-              showingOriginal={showOriginalAB}
-            />
-          </YouTubeKeyAnalysis>
-
           {(file || youtubeUrl) && (
-            <TransposeControls
-              value={semitones}
-              min={CONFIG.SEMITONE_MIN}
-              max={CONFIG.SEMITONE_MAX}
-              onChange={handleTranspose}
-              onVisualChange={setSemitones}
-              onReset={handleResetTranspose}
-              disabled={processing || isProcessingYouTube}
-              tempoMode={tempoMode}
-              onTempoModeChange={setTempoMode}
-            />
+            <div className='workspace'>
+              <section className='workspace-media'>
+                <PlayerSection
+                  file={file}
+                  youtubeUrl={youtubeUrl}
+                  transposedSrc={transposedSrc}
+                  originalSrc={originalSrc}
+                  playing={playing}
+                  setPlaying={setPlaying}
+                  processing={processing}
+                  isProcessingYouTube={isProcessingYouTube}
+                  seekTo={seekTo}
+                  semitones={semitones}
+                  appliedSemitones={appliedSemitones}
+                  processedItems={processedItems}
+                  controlsDisabled={processing || isProcessingYouTube}
+                  youtubeKey={youtubeKey}
+                  mediaRef={playerRef}
+                  showOriginal={showOriginalAB}
+                  setShowOriginal={setShowOriginalAB}
+                />
+
+                {(youtubeUrl || (file && activeKey)) && (
+                  <div className='key-display'>
+                    <span className='key-display-original'>
+                      Original key:{" "}
+                      <span className='key-display-original-value'>
+                        {originalKeyLabel}
+                      </span>
+                    </span>
+                    <span>
+                      Current key:{" "}
+                      <span className='key-display-current-value'>
+                        {currentKeyLabel}
+                      </span>
+                    </span>
+                  </div>
+                )}
+
+                <YouTubePlayer url={youtubeUrl} show={showOriginalYouTube} />
+              </section>
+
+              <section className='workspace-controls'>
+                <YouTubeKeyAnalysis
+                  youtubeUrl={youtubeUrl}
+                  file={file}
+                  isAnalyzingKey={isAnalyzingKey || isAnalyzingFileKey}
+                  isProcessingYouTube={isProcessingYouTube}
+                  handleAnalyzeKey={
+                    youtubeUrl ? handleAnalyzeKey : () => analyzeFileKey(file)
+                  }
+                  handleReanalyzeKey={
+                    youtubeUrl
+                      ? () => handleAnalyzeKey()
+                      : () => analyzeFileKey(file)
+                  }
+                  keyFeedback={keyFeedback}
+                  keyAnalyzeDots={keyAnalyzeDots}
+                  youtubeKey={activeKey}
+                >
+                  <KeySelector
+                    youtubeKey={activeKey}
+                    appliedSemitones={appliedSemitones}
+                    processing={processing || isAnalyzingFileKey}
+                    isProcessingYouTube={isProcessingYouTube}
+                    handleTranspose={handleTranspose}
+                    processedItems={processedItems}
+                    youtubeUrl={youtubeUrl}
+                    showingOriginal={showOriginalAB}
+                  />
+                </YouTubeKeyAnalysis>
+
+                <TransposeControls
+                  value={semitones}
+                  min={CONFIG.SEMITONE_MIN}
+                  max={CONFIG.SEMITONE_MAX}
+                  onChange={handleTranspose}
+                  onVisualChange={setSemitones}
+                  onReset={handleResetTranspose}
+                  disabled={processing || isProcessingYouTube}
+                  tempoMode={tempoMode}
+                  onTempoModeChange={setTempoMode}
+                />
+
+                {!youtubeUrl && (
+                  <div className='center-row'>
+                    <label className='wasm-toggle-label'>
+                      <input
+                        type='checkbox'
+                        className='wasm-toggle-checkbox'
+                        checked={useWasm}
+                        onChange={(e) => setUseWasm(e.target.checked)}
+                        disabled={processing}
+                      />
+                      Use in-browser (WASM) transposition
+                    </label>
+                  </div>
+                )}
+
+                {youtubeUrl && !isProcessingYouTube && (
+                  <div className='transpose-tip'>
+                    Tip: use +/− for quick transpose previews; latest request is
+                    applied.
+                  </div>
+                )}
+
+                <DownloadShare
+                  onDownload={handleDownload}
+                  onShare={handleShare}
+                  disabled={!transposedSrc || processing || isProcessingYouTube}
+                  formats={OUTPUT_FORMATS}
+                  selectedFormat={outputFormat}
+                  onFormatChange={setOutputFormat}
+                />
+
+                <ChordSheet keyLabel={currentKeyLabel} />
+
+                <div className='chord-doc-toggle-row'>
+                  <button
+                    className={`chord-doc-toggle-btn${showChordDoc ? " open" : ""}`}
+                    onClick={() => setShowChordDoc((v) => !v)}
+                  >
+                    {showChordDoc
+                      ? "Hide Chord Sheet Generator ▲"
+                      : "Get Chord Sheet ▼"}
+                  </button>
+                </div>
+
+                {showChordDoc && (
+                  <ChordDocGenerator
+                    songTitle={
+                      file?.name ||
+                      processedItems.find((i) => i.youtubeUrl === youtubeUrl)
+                        ?.title ||
+                      ""
+                    }
+                    artist={
+                      processedItems.find((i) => i.youtubeUrl === youtubeUrl)
+                        ?.artist || ""
+                    }
+                    selectedKey={currentKeyLabel}
+                  />
+                )}
+              </section>
+            </div>
           )}
 
           <Notice notice={notice} />
@@ -856,72 +926,6 @@ function App() {
                 Retry
               </button>
             </div>
-          )}
-
-          {(file || youtubeUrl) && (
-            <>
-              {!youtubeUrl && (
-                <div className='center-row'>
-                  <label className='wasm-toggle-label'>
-                    <input
-                      type='checkbox'
-                      className='wasm-toggle-checkbox'
-                      checked={useWasm}
-                      onChange={(e) => setUseWasm(e.target.checked)}
-                      disabled={processing}
-                    />
-                    Use in-browser (WASM) transposition
-                  </label>
-                </div>
-              )}
-
-              {youtubeUrl && !isProcessingYouTube && (
-                <div className='transpose-tip'>
-                  Tip: use +/− for quick transpose previews; latest request is
-                  applied.
-                </div>
-              )}
-
-              <YouTubePlayer url={youtubeUrl} show={showOriginalYouTube} />
-
-              <DownloadShare
-                onDownload={handleDownload}
-                onShare={handleShare}
-                disabled={!transposedSrc || processing || isProcessingYouTube}
-                formats={OUTPUT_FORMATS}
-                selectedFormat={outputFormat}
-                onFormatChange={setOutputFormat}
-              />
-
-              <ChordSheet keyLabel={currentKeyLabel} />
-
-              <div className='chord-doc-toggle-row'>
-                <button
-                  className={`chord-doc-toggle-btn${showChordDoc ? " open" : ""}`}
-                  onClick={() => setShowChordDoc((v) => !v)}
-                >
-                  {showChordDoc
-                    ? "Hide Chord Sheet Generator ▲"
-                    : "Get Chord Sheet ▼"}
-                </button>
-              </div>
-
-              {showChordDoc && (
-                <ChordDocGenerator
-                  songTitle={
-                    file?.name ||
-                    processedItems.find((i) => i.youtubeUrl === youtubeUrl)
-                      ?.title ||
-                    ""
-                  }
-                  artist={
-                    processedItems.find((i) => i.youtubeUrl === youtubeUrl)
-                      ?.artist || ""
-                  }
-                  selectedKey={currentKeyLabel}
-                />
-              )}
-            </>
           )}
 
           <FileUpload
