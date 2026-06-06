@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import Magnetic from './fx/Magnetic';
 
 const YOUTUBE_DOMAINS = [
   'youtube.com',
@@ -72,9 +73,11 @@ const YouTubeInput = ({ onSubmit, disabled }) => {
           Please enter a valid YouTube URL (youtube.com, youtu.be, youtube Shorts or Music)
         </div>
       )}
-      <button type="submit" disabled={!canSubmit} className="youtube-submit-btn shimmer-btn">
-        Load
-      </button>
+      <Magnetic>
+        <button type="submit" disabled={!canSubmit} className="youtube-submit-btn shimmer-btn">
+          Load
+        </button>
+      </Magnetic>
     </form>
   );
 };

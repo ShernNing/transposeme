@@ -39,6 +39,8 @@ import { CONFIG } from "./utils/config";
 import AuroraBackground from "./components/fx/AuroraBackground";
 import ParticleField from "./components/fx/ParticleField";
 import { ShinyTitle, Typewriter } from "./components/fx/HeroText";
+import LampGlow from "./components/fx/LampGlow";
+import AnimatedValue from "./components/fx/AnimatedValue";
 import BorderBeam from "./components/fx/BorderBeam";
 import MultiStepLoader from "./components/fx/MultiStepLoader";
 import { YT_STEPS, stepIndexFromLabel } from "./components/fx/ytSteps";
@@ -706,6 +708,7 @@ function App() {
       <AuroraBackground paused={processing || isProcessingYouTube} />
       <ParticleField paused={processing || isProcessingYouTube} />
       <main className='app-shell'>
+        <LampGlow />
         <ShinyTitle>TransposeMe</ShinyTitle>
         <Typewriter text='Shift pitch & tempo of YouTube videos and audio files — locally, instantly.' />
         {showSlowTransposeNote && (
@@ -809,15 +812,17 @@ function App() {
                   <div className='key-display'>
                     <span className='key-display-original'>
                       Original key:{" "}
-                      <span className='key-display-original-value'>
-                        {originalKeyLabel}
-                      </span>
+                      <AnimatedValue
+                        value={originalKeyLabel}
+                        className='key-display-original-value'
+                      />
                     </span>
                     <span>
                       Current key:{" "}
-                      <span className='key-display-current-value'>
-                        {currentKeyLabel}
-                      </span>
+                      <AnimatedValue
+                        value={currentKeyLabel}
+                        className='key-display-current-value'
+                      />
                     </span>
                   </div>
                 )}

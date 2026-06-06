@@ -1,6 +1,9 @@
 // ProcessedHistory.jsx
 import React, { useState, useMemo, useRef } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import { clearAllProcessedItems, saveProcessedItem } from "../utils/db";
+
+const MotionRow = motion.div;
 
 function formatDuration(seconds) {
   if (!isFinite(seconds)) return '';
@@ -167,14 +170,20 @@ export default function ProcessedHistory({ processedItems, onLoad, onDelete, onC
         </select>
       </div>
       <div style={{ display: "flex", flexDirection: 'column', gap: 0 }}>
+        <AnimatePresence initial={false}>
         {filteredItems.map((item, idx) => (
-          <div
+          <MotionRow
             key={item.id}
+            layout
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, x: -16 }}
+            transition={{ duration: 0.25, delay: Math.min(idx * 0.03, 0.3) }}
             style={{
               display: 'flex', alignItems: 'center', gap: 12, padding: '0 20px',
               background: hoveredId === item.id ? '#31384a' : (idx % 2 === 0 ? 'transparent' : '#262b36'),
               borderBottom: idx === filteredItems.length - 1 ? 'none' : '1px solid #23272f',
-              minHeight: 44, position: 'relative', transition: 'background 0.15s',
+              minHeight: 44, position: 'relative',
             }}
             onMouseEnter={() => setHoveredId(item.id)}
             onMouseLeave={() => setHoveredId(null)}
@@ -212,8 +221,9 @@ export default function ProcessedHistory({ processedItems, onLoad, onDelete, onC
                 🗑️
               </button>
             )}
-          </div>
+          </MotionRow>
         ))}
+        </AnimatePresence>
       </div>
       </>}
     </div>
