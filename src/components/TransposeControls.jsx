@@ -1,4 +1,5 @@
 import React from 'react';
+import CountUp from './fx/CountUp';
 
 const INTERVAL_NAMES = {
   0: "Unison", 1: "Minor 2nd ↑", 2: "Major 2nd ↑", 3: "Minor 3rd ↑", 4: "Major 3rd ↑",
@@ -60,9 +61,25 @@ const TransposeControls = ({ value, min, max, onChange, onVisualChange, onReset,
       Reset
     </button>
     <span style={{ marginLeft: 12, color: '#fff', minWidth: 120, display: 'inline-block' }}>
-      {tempoMode
-        ? value === 0 ? '1× (original)' : `${Math.pow(2, value / 12).toFixed(2)}×`
-        : <>{value > 0 ? `+${value}` : value}<span style={{ color: '#718096', fontSize: 11, marginLeft: 7 }}>{INTERVAL_NAMES[String(value)] || ''}</span></>}
+      {tempoMode ? (
+        <CountUp
+          value={value === 0 ? 1 : Math.pow(2, value / 12)}
+          format={(v) => (value === 0 ? '1× (original)' : `${v.toFixed(2)}×`)}
+        />
+      ) : (
+        <>
+          <CountUp
+            value={value}
+            format={(v) => {
+              const r = Math.round(v);
+              return r > 0 ? `+${r}` : `${r}`;
+            }}
+          />
+          <span style={{ color: '#718096', fontSize: 11, marginLeft: 7 }}>
+            {INTERVAL_NAMES[String(value)] || ''}
+          </span>
+        </>
+      )}
     </span>
   </div>
 );

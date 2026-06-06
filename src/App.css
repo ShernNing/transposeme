@@ -35,6 +35,14 @@ body {
   justify-content: flex-start;
   padding: 20px 14px 32px;
   box-sizing: border-box;
+  position: relative;
+}
+
+/* Keep all UI above the fixed WebGL aurora canvas (z-index: 0) */
+.app-shell,
+.app-footer {
+  position: relative;
+  z-index: 1;
 }
 
 .app-shell {
@@ -575,3 +583,223 @@ input[type="range"]::-moz-range-thumb {
   margin-right: 12px;
 }
 .app-footer-link:hover { text-decoration: underline; }
+
+/* ===================================================================
+   Stunning UI layer — animated title, glass, border beam, stepper,
+   waveform, buttons. (Tailwind utilities available; preflight skipped.)
+   =================================================================== */
+
+/* --- Animated gradient + sheen title --- */
+.shiny-title {
+  background: linear-gradient(
+    100deg,
+    #9ae6b4 0%,
+    #90cdf4 30%,
+    #b794f4 50%,
+    #90cdf4 70%,
+    #9ae6b4 100%
+  );
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: title-sheen 6s linear infinite;
+  text-shadow: 0 0 40px rgba(102, 217, 163, 0.15);
+}
+@keyframes title-sheen {
+  to { background-position: 220% center; }
+}
+
+/* --- Typewriter caret --- */
+.type-caret {
+  display: inline-block;
+  margin-left: 1px;
+  color: #90cdf4;
+  font-weight: 300;
+  animation: caret-blink 1s steps(1) infinite;
+}
+@keyframes caret-blink {
+  50% { opacity: 0; }
+}
+
+/* --- Glass card glow-up --- */
+.app-card {
+  position: relative;
+  background: linear-gradient(
+    180deg,
+    rgba(18, 24, 42, 0.78),
+    rgba(10, 14, 26, 0.82)
+  );
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+}
+
+/* --- Border beam (rotating ring of light around .app-card) --- */
+@property --beam-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+.border-beam {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--beam-angle),
+    transparent 0deg,
+    transparent 280deg,
+    #66d9a3 320deg,
+    #90cdf4 345deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: beam-rotate 4s linear infinite;
+  z-index: 2;
+}
+@keyframes beam-rotate {
+  to { --beam-angle: 360deg; }
+}
+.app-card.is-processing {
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.45),
+    0 0 40px rgba(102, 217, 163, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* --- Multi-step loader (YouTube pipeline) --- */
+.yt-processing {
+  margin: 16px 0 6px;
+}
+.step-loader {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+.step-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  transition: color 200ms;
+}
+.step-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  position: relative;
+}
+.step-num { font-size: 0.72rem; }
+.step-pulse {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #66d9a3;
+  display: inline-block;
+}
+.step-done .step-dot {
+  background: linear-gradient(135deg, #66d9a3, #38a169);
+  border-color: transparent;
+  color: #0a0f1a;
+}
+.step-done .step-label { color: #9ae6b4; }
+.step-active .step-dot {
+  border-color: #66d9a3;
+  box-shadow: 0 0 0 4px rgba(102, 217, 163, 0.16);
+}
+.step-active .step-label { color: #e6e9ef; font-weight: 600; }
+.step-pending .step-dot { color: #4a5568; }
+.step-pending .step-label { color: #4a5568; }
+
+/* --- Audio waveform visualizer --- */
+.audio-waveform {
+  width: 100%;
+  margin: 4px 0 8px;
+  filter: drop-shadow(0 2px 10px rgba(102, 217, 163, 0.18));
+}
+
+/* --- Progress bar shimmer --- */
+.progress-bar {
+  position: relative;
+  overflow: hidden;
+}
+.progress-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.45),
+    transparent
+  );
+  transform: translateX(-100%);
+  animation: progress-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes progress-shimmer {
+  100% { transform: translateX(100%); }
+}
+
+/* --- Primary buttons: sweep sheen on hover --- */
+button {
+  position: relative;
+  overflow: hidden;
+}
+button:not(:disabled)::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -120%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    rgba(255, 255, 255, 0.28),
+    transparent
+  );
+  transform: skewX(-18deg);
+  transition: left 600ms ease;
+  pointer-events: none;
+}
+button:not(:disabled):hover::after {
+  left: 140%;
+}
+
+/* --- Empty-state steps: subtle glow on hover --- */
+.empty-state-step {
+  transition: transform 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
+}
+.empty-state-step:hover {
+  transform: translateY(-2px);
+  border-color: rgba(102, 217, 163, 0.4);
+  box-shadow: 0 6px 20px rgba(102, 217, 163, 0.1);
+}
+
+/* --- Respect reduced motion --- */
+@media (prefers-reduced-motion: reduce) {
+  .shiny-title,
+  .type-caret,
+  .border-beam,
+  .progress-bar::after {
+    animation: none !important;
+  }
+  button:not(:disabled)::after { transition: none; }
+}

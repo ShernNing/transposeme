@@ -36,6 +36,12 @@ import { isVideo } from "./utils/videoUtils";
 import { remuxVideoWithAudio, releaseFFmpeg } from "./utils/videoRemuxer";
 import { transposeDetectedKey } from "./utils/keyUtils";
 import { CONFIG } from "./utils/config";
+import AuroraBackground from "./components/fx/AuroraBackground";
+import { ShinyTitle, Typewriter } from "./components/fx/HeroText";
+import BorderBeam from "./components/fx/BorderBeam";
+import MultiStepLoader from "./components/fx/MultiStepLoader";
+import { YT_STEPS, stepIndexFromLabel } from "./components/fx/ytSteps";
+import { fireConfetti } from "./utils/confetti";
 import "./App.css";
 
 const OUTPUT_FORMATS = ["mp3", "mp4"];
@@ -332,6 +338,7 @@ function App() {
         metadata: meta,
       });
       analyzeFileKey(blob, f.name.replace(/\.[^.]+$/, "") + ".wav");
+      fireConfetti();
     },
     [
       setTransposedFromBlob,
@@ -623,6 +630,7 @@ function App() {
     a.click();
     a.remove();
     showNotice("success", `Downloaded ${fileName}`);
+    fireConfetti();
   }, [
     transposedSrc,
     processedItems,
@@ -694,19 +702,20 @@ function App() {
 
   return (
     <div className='App'>
+      <AuroraBackground paused={processing || isProcessingYouTube} />
       <main className='app-shell'>
-        <h1 className='app-title'>TransposeMe</h1>
-        <p className='app-subtitle'>
-          Shift pitch &amp; tempo of YouTube videos and audio files — locally,
-          instantly.
-        </p>
+        <ShinyTitle>TransposeMe</ShinyTitle>
+        <Typewriter text='Shift pitch & tempo of YouTube videos and audio files — locally, instantly.' />
         {showSlowTransposeNote && (
           <div className='slow-transpose-note'>
             ⏱️ This transpose is taking longer than expected. Due to server
             bottlenecks, it may take 1 to 5 minutes to complete.
           </div>
         )}
-        <div className='app-card'>
+        <div
+          className={`app-card${processing || isProcessingYouTube ? " is-processing" : ""}`}
+        >
+          {(processing || isProcessingYouTube) && <BorderBeam />}
           <ProcessedHistory
             processedItems={processedItems}
             onLoad={handleLoadProcessed}
@@ -740,10 +749,16 @@ function App() {
           />
 
           {isProcessingYouTube && (
-            <ProgressBar
-              progress={ytProgress}
-              label={processingStep || "Processing…"}
-            />
+            <div className='yt-processing'>
+              <MultiStepLoader
+                steps={YT_STEPS}
+                current={stepIndexFromLabel(processingStep)}
+              />
+              <ProgressBar
+                progress={ytProgress}
+                label={processingStep || "Processing…"}
+              />
+            </div>
           )}
           {wasmProgress > 0 && (
             <ProgressBar

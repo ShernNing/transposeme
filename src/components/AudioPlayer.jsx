@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle } from "react";
 import styles from "./AudioPlayer.module.css";
 import { CONFIG } from "../utils/config";
+import AudioWaveform from "./AudioWaveform";
 
 const AudioPlayer = forwardRef(function AudioPlayer({ src, playing, onPlay, onPause, disabled, seekTo, label }, ref) {
   const audioRef = useRef();
@@ -33,6 +34,7 @@ const AudioPlayer = forwardRef(function AudioPlayer({ src, playing, onPlay, onPa
   return (
     <div className={styles.audioPlayerContainer}>
       {label && <div className={styles.audioPlayerLabel}>{label}</div>}
+      <AudioWaveform audioRef={audioRef} playing={playing} />
       <audio
         ref={audioRef}
         src={src}

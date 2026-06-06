@@ -71,7 +71,15 @@
       "Bash(grep -E 'cookies.txt|^\\\\.env$')",
       "Bash(git check-ignore *)",
       "mcp__Claude_Preview__preview_start",
-      "Bash(pkill -f \"vite\")"
+      "Bash(pkill -f \"vite\")",
+      "WebFetch(domain:reactbits.dev)",
+      "WebFetch(domain:magicui.design)",
+      "WebFetch(domain:ui.aceternity.com)",
+      "WebFetch(domain:www.fancycomponents.dev)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(curl -s \"https://api.github.com/repos/DavidHDev/react-bits/git/trees/main?recursive=1\")",
+      "Bash(node -e \"const p=require\\('./package.json'\\);console.log\\('tailwindcss',p.devDependencies.tailwindcss\\);console.log\\('@tailwindcss/vite',p.devDependencies['@tailwindcss/vite']\\);console.log\\('motion',p.dependencies.motion\\);console.log\\('canvas-confetti',p.dependencies['canvas-confetti']\\);console.log\\('ogl',p.dependencies.ogl\\)\")",
+      "Bash(pkill -f vite)"
     ]
   }
 }

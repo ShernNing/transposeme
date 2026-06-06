@@ -1,3 +1,8 @@
+/* Tailwind v4 — utilities + theme only (preflight skipped to preserve existing component CSS) */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
