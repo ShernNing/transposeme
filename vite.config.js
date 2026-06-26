@@ -3,7 +3,20 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 
-export default defineConfig({
+// `vite build --mode electron` forces the packaged desktop app to talk to the
+// backend it spawns locally (main.cjs) instead of the Render server. That backend
+// runs on the user's own connection — a residential IP YouTube rarely blocks — so
+// desktop sidesteps the datacenter cookie/bot problem entirely.
+// (Requires yt-dlp, ffmpeg, rubberband and python+essentia installed locally.)
+export default defineConfig(({ mode }) => ({
+  define:
+    mode === "electron"
+      ? {
+          "import.meta.env.VITE_API_BASE_URL": JSON.stringify(
+            "http://localhost:4000",
+          ),
+        }
+      : {},
   plugins: [
     react(),
     tailwindcss(),
@@ -57,4 +70,4 @@ export default defineConfig({
   build: {
     chunkSizeWarningLimit: 1024,
   },
-});
+}));

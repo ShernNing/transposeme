@@ -7,10 +7,16 @@ RUN apt-get update && \
     apt-get install -y ffmpeg rubberband-cli build-essential libfftw3-dev libsamplerate0-dev libtag1-dev curl && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies (yt-dlp required; essentia optional for key detection)
+# Required: yt-dlp on the NIGHTLY channel (YouTube breaks the stable extractor
+# constantly — nightly carries fixes days/weeks sooner) plus the bgutil PO-token
+# plugin. Rebuild this image regularly (e.g. weekly) so yt-dlp stays current.
+# NOTE: the plugin only helps when a provider server is reachable — set
+# POT_PROVIDER_BASE_URL and run the provider (see render.yaml / YOUTUBE.md).
 RUN pip install --upgrade pip && \
-    pip install --upgrade --no-cache-dir yt-dlp && \
-    pip install essentia || echo "[warn] essentia install failed — youtube-key endpoint will be unavailable"
+    pip install --upgrade --no-cache-dir --pre "yt-dlp[default]" bgutil-ytdlp-pot-provider
+
+# Optional: essentia (key detection only). Never fail the build over it.
+RUN pip install --no-cache-dir essentia || echo "[warn] essentia install failed — youtube-key endpoint will be unavailable"
 
 # Install Node.js (from NodeSource)
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \

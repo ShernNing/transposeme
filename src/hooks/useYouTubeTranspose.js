@@ -6,10 +6,31 @@ import { CONFIG } from "../utils/config";
 function prettyApiError(fallback, payloadText = "") {
   // Parse JSON to avoid false-positives from the hint field containing words like "proxy"
   let text = (payloadText || "").toLowerCase();
+  let code = "";
   try {
     const parsed = JSON.parse(payloadText);
     text = ((parsed.details || "") + " " + (parsed.error || "")).toLowerCase();
-  } catch {}
+    code = (parsed.code || "").toUpperCase();
+  } catch {
+    /* non-JSON payload — fall through to text heuristics */
+  }
+  // Prefer the server's typed classification when present.
+  switch (code) {
+    case "BOT_CHECK":
+      return "YouTube blocked the server (bot check). Try again shortly, or use the desktop app to download from your own connection.";
+    case "UNAVAILABLE":
+      return "This YouTube video is unavailable (private, region-locked, or removed).";
+    case "RATE_LIMIT":
+      return "YouTube temporarily rate-limited the server. Wait a minute and try again.";
+    case "TOO_LONG":
+      return "This video is too long to process. Try a shorter one.";
+    case "FORMAT":
+      return "Couldn't extract a downloadable stream — it may be a live stream or DRM-protected.";
+    case "TIMEOUT":
+      return "The download timed out. Try again, or use a shorter video.";
+    default:
+      break;
+  }
   if (text.includes("proxy") || text.includes("403"))
     return "Network/proxy blocked YouTube download. Please disable any proxy/VPN and try again.";
   if (text.includes("private video") || text.includes("video unavailable"))

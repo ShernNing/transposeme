@@ -16,3 +16,24 @@ services:
         value: https://transposeme.vercel.app
       - key: COOKIES_PATH
         value: /etc/secrets/cookies.txt
+      # Player clients yt-dlp rotates through (first that works wins).
+      - key: YTDLP_PLAYER_CLIENTS
+        value: default,tv,web_safari,mweb
+      # Residential/mobile proxy — biggest fix for datacenter bot-blocks.
+      # Set in the Render dashboard (it carries credentials; keep it out of git).
+      # - key: YTDLP_PROXY
+      #   sync: false
+      # PO-token provider URL. Uncomment once the provider service below is live;
+      # use its internal address. Lets yt-dlp work without cookies on cloud IPs.
+      # - key: POT_PROVIDER_BASE_URL
+      #   value: http://transposeme-pot:4416
+
+  # OPTIONAL — PO-token provider. Deploy this, then set POT_PROVIDER_BASE_URL
+  # above to http://transposeme-pot:4416. Private service = not publicly exposed.
+  # Needs ~256MB+ RAM; the free plan may OOM, so give it a paid plan.
+  # - type: pserv
+  #   name: transposeme-pot
+  #   runtime: image
+  #   plan: starter
+  #   image:
+  #     url: docker.io/brainicism/bgutil-ytdlp-pot-provider:latest

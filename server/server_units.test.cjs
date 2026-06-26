@@ -2,7 +2,12 @@
 // Importing index.cjs is side-effect-free (server boot is guarded by require.main).
 const { test } = require("node:test");
 const assert = require("node:assert");
-const { BoundedCache, isValidYouTubeUrl } = require("./index.cjs");
+const {
+  BoundedCache,
+  isValidYouTubeUrl,
+  classifyYtError,
+  buildYtDlpArgs,
+} = require("./index.cjs");
 
 test("BoundedCache: basic get/set/has", () => {
   const c = new BoundedCache(2, 60000);
@@ -62,4 +67,53 @@ test("isValidYouTubeUrl: rejects non-YouTube / malformed", () => {
   assert.ok(!isValidYouTubeUrl("not a url"));
   assert.ok(!isValidYouTubeUrl("https://evil.com/youtube.com/watch"));
   assert.ok(!isValidYouTubeUrl(""));
+});
+
+test("classifyYtError: bot check is retryable BOT_CHECK", () => {
+  const r = classifyYtError(
+    "ERROR: [youtube] Sign in to confirm you're not a bot",
+  );
+  assert.strictEqual(r.code, "BOT_CHECK");
+  assert.strictEqual(r.retryable, true);
+});
+
+test("classifyYtError: private/removed video is non-retryable UNAVAILABLE", () => {
+  assert.strictEqual(classifyYtError("ERROR: Private video").code, "UNAVAILABLE");
+  assert.strictEqual(
+    classifyYtError("Video unavailable: This video has been removed").retryable,
+    false,
+  );
+});
+
+test("classifyYtError: rate limit + unknown", () => {
+  assert.strictEqual(classifyYtError("HTTP Error 429").code, "RATE_LIMIT");
+  const u = classifyYtError("some unrecognized failure");
+  assert.strictEqual(u.code, "UNKNOWN");
+  assert.strictEqual(u.retryable, true);
+});
+
+test("buildYtDlpArgs: encodes client, format and url; omits cookies/proxy when absent", () => {
+  const args = buildYtDlpArgs({
+    url: "https://youtu.be/abc123",
+    outPath: "/tmp/out.m4a",
+    client: "tv",
+    cookiesPath: null,
+  });
+  assert.ok(args.includes("youtube:player_client=tv"));
+  const fIdx = args.indexOf("-f");
+  assert.strictEqual(args[fIdx + 1], "bestaudio/best");
+  assert.strictEqual(args[args.length - 1], "https://youtu.be/abc123");
+  assert.ok(!args.includes("--cookies"));
+  assert.ok(!args.includes("--proxy"));
+});
+
+test("buildYtDlpArgs: prepends --cookies when a cookie path is given", () => {
+  const args = buildYtDlpArgs({
+    url: "https://youtu.be/abc123",
+    outPath: "/tmp/out.m4a",
+    client: "default",
+    cookiesPath: "/tmp/cookies.txt",
+  });
+  assert.strictEqual(args[0], "--cookies");
+  assert.strictEqual(args[1], "/tmp/cookies.txt");
 });

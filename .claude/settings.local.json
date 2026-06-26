@@ -79,7 +79,11 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(curl -s \"https://api.github.com/repos/DavidHDev/react-bits/git/trees/main?recursive=1\")",
       "Bash(node -e \"const p=require\\('./package.json'\\);console.log\\('tailwindcss',p.devDependencies.tailwindcss\\);console.log\\('@tailwindcss/vite',p.devDependencies['@tailwindcss/vite']\\);console.log\\('motion',p.dependencies.motion\\);console.log\\('canvas-confetti',p.dependencies['canvas-confetti']\\);console.log\\('ogl',p.dependencies.ogl\\)\")",
-      "Bash(pkill -f vite)"
+      "Bash(pkill -f vite)",
+      "Bash(node --check vite.config.js)",
+      "Bash(node --check src/hooks/useYouTubeTranspose.js)",
+      "Bash(node --check server/index.cjs)",
+      "Bash(node -e \"const m=require\\('./server/index.cjs'\\); console.log\\('exports:', Object.keys\\(m\\).join\\(','\\)\\);\")"
     ]
   }
 }

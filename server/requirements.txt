@@ -1,2 +1,4 @@
-yt-dlp
+# yt-dlp is installed separately on the nightly channel (see render-build.sh /
+# Dockerfile.conda) — do NOT list it here or pip would pin it back to stable.
+# bgutil-ytdlp-pot-provider (PO-token plugin) is likewise installed there.
 essentia

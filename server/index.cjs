@@ -102,6 +102,29 @@ const PYTHON_TIMEOUT_MS = 60000;
 const MAX_VIDEO_DURATION_SECONDS = 1200;
 const COOKIES_PATH = process.env.COOKIES_PATH || "/app/cookies.txt";
 const COOKIES_EXISTS = fs.existsSync(COOKIES_PATH);
+
+// --- YouTube extraction tuning (all overridable via env) ---------------------
+// Optional proxy for yt-dlp. Datacenter IPs (Render, etc.) get bot-flagged by
+// YouTube; routing through a residential/mobile proxy is the single biggest fix.
+// Example: "http://user:pass@host:port" or "socks5://host:port".
+const YTDLP_PROXY = process.env.YTDLP_PROXY || "";
+// Player clients tried in order. YouTube breaks individual clients frequently,
+// so we rotate. Override with a comma list, e.g. "tv,web_safari,mweb".
+const YTDLP_PLAYER_CLIENTS = (
+  process.env.YTDLP_PLAYER_CLIENTS || "default,tv,web_safari,mweb"
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+// PO Token (Proof-of-Origin) provider base URL. With the bgutil yt-dlp plugin +
+// a reachable provider server, yt-dlp can fetch without (or alongside) cookies —
+// the most robust fix for datacenter blocks. e.g. "http://127.0.0.1:4416".
+const POT_PROVIDER_BASE_URL = process.env.POT_PROVIDER_BASE_URL || "";
+// Whole-loop retries over the client rotation on transient failure.
+const YTDLP_MAX_ATTEMPTS = Math.max(
+  1,
+  parseInt(process.env.YTDLP_MAX_ATTEMPTS || "2", 10) || 2,
+);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
 if (CORS_ORIGIN === "*" && process.env.NODE_ENV === "production") {
   console.warn("[startup] Warning: CORS_ORIGIN is wildcard (*) in production. Set CORS_ORIGIN env var to restrict access.");
@@ -191,7 +214,15 @@ app.use(express.json({ limit: "10kb" }));
 // Log a safe allowlist of env vars at startup. Never dump full process.env —
 // it leaks secrets (cookies path, API keys, tokens) into logs.
 function logEnv() {
-  const SAFE_KEYS = ["NODE_ENV", "PORT", "CORS_ORIGIN", "COOKIES_PATH"];
+  // YTDLP_PROXY omitted on purpose — it can embed proxy credentials.
+  const SAFE_KEYS = [
+    "NODE_ENV",
+    "PORT",
+    "CORS_ORIGIN",
+    "COOKIES_PATH",
+    "YTDLP_PLAYER_CLIENTS",
+    "POT_PROVIDER_BASE_URL",
+  ];
   const safe = {};
   for (const k of SAFE_KEYS) {
     if (process.env[k] != null) safe[k] = process.env[k];
@@ -382,21 +413,90 @@ async function getWritableCookiesPath() {
   return dest;
 }
 
-// Download the native best-audio stream to outPath (raw container — m4a/opus/webm).
-// No WAV extraction here: decoding to PCM happens once in getSourceAudio, avoiding a
-// redundant transcode. `-N` downloads fragments in parallel for faster network IO.
-async function downloadAudio(url, outPath) {
-  const cookiesPath = await getWritableCookiesPath();
-  const ytDlpArgs = [
-    // EJS challenge solver (sig/n decryption). Node.js is installed in the Docker image.
+// Map raw yt-dlp/ffmpeg stderr to a typed, user-actionable error. Lets the
+// frontend show a useful message instead of a wall of yt-dlp output, and lets
+// downloadAudio decide whether rotating to another client could help.
+const YT_ERROR_PATTERNS = [
+  {
+    re: /sign in to confirm|not a bot|confirm you'?re|consent|account.*cookies|use --cookies/i,
+    code: "BOT_CHECK",
+    hint: "YouTube is blocking this server (bot check). Refresh cookies, enable a PO-token provider, or use the desktop app (downloads from your own connection).",
+    retryable: true,
+  },
+  {
+    re: /private video|video unavailable|has been removed|account.*terminated|who has blocked it|not available in your country|region/i,
+    code: "UNAVAILABLE",
+    hint: "This video is private, removed, or region-locked.",
+    retryable: false,
+  },
+  {
+    re: /requested format is not available|no video formats|unable to extract|drm/i,
+    code: "FORMAT",
+    hint: "Could not extract a downloadable stream. The video may be DRM-protected, a live stream, or yt-dlp needs updating.",
+    retryable: true,
+  },
+  {
+    re: /http error 429|too many requests|rate.?limit/i,
+    code: "RATE_LIMIT",
+    hint: "YouTube rate-limited this server. Wait a minute and retry, or route through a proxy.",
+    retryable: true,
+  },
+  {
+    re: /does not pass filter|duration.*<=|matchfilter/i,
+    code: "TOO_LONG",
+    hint: `Video exceeds the ${Math.round(MAX_VIDEO_DURATION_SECONDS / 60)}-minute limit.`,
+    retryable: false,
+  },
+  {
+    re: /timed out|timeout/i,
+    code: "TIMEOUT",
+    hint: "Download timed out. Try again, or use a shorter video.",
+    retryable: true,
+  },
+];
+
+function classifyYtError(stderr = "") {
+  for (const p of YT_ERROR_PATTERNS) {
+    if (p.re.test(stderr))
+      return { code: p.code, hint: p.hint, retryable: p.retryable };
+  }
+  return {
+    code: "UNKNOWN",
+    hint: "Video may be unavailable, blocked, too long, or the network is restricted.",
+    retryable: true,
+  };
+}
+
+function decorateYtError(e) {
+  const raw = e?.stderr || e?.message || "yt-dlp failed";
+  const { code, hint } = classifyYtError(raw);
+  const err = new Error(raw);
+  err.code = code;
+  err.hint = hint;
+  err.stderr = e?.stderr;
+  return err;
+}
+
+// Consistent JSON body for a failed extraction. Carries the typed `code` and a
+// user-facing `hint` so the frontend can show something better than raw stderr.
+function ytErrorResponse(e, error = "Failed to process audio") {
+  const { code, hint } = e?.code
+    ? { code: e.code, hint: e.hint }
+    : classifyYtError(e?.message || "");
+  return { error, code: code || "UNKNOWN", details: e?.message, hint };
+}
+
+// Build the yt-dlp argv for one player client. Cookies, proxy and PO-token
+// provider are all optional and only added when configured.
+function buildYtDlpArgs({ url, outPath, client, cookiesPath }) {
+  const args = [
+    // EJS challenge solver (sig/n decryption). Node.js is in the Docker image.
     "--remote-components",
     "ejs:github",
     "--js-runtimes",
     "node",
     "--extractor-args",
-    "youtube:player_client=default",
-    "--proxy",
-    "",
+    `youtube:player_client=${client}`,
     "--match-filter",
     `duration <= ${MAX_VIDEO_DURATION_SECONDS}`,
     "-f",
@@ -406,26 +506,72 @@ async function downloadAudio(url, outPath) {
     "-o",
     outPath,
   ];
-  if (cookiesPath) {
-    ytDlpArgs.unshift("--cookies", cookiesPath);
+  if (POT_PROVIDER_BASE_URL) {
+    args.push(
+      "--extractor-args",
+      `youtubepot-bgutilhttp:base_url=${POT_PROVIDER_BASE_URL}`,
+    );
   }
-  ytDlpArgs.push(url);
+  if (YTDLP_PROXY) {
+    args.push("--proxy", YTDLP_PROXY);
+  }
+  if (cookiesPath) {
+    args.unshift("--cookies", cookiesPath);
+  }
+  args.push(url);
+  return args;
+}
 
-  await new Promise((resolve, reject) => {
+function runYtDlp(args) {
+  return new Promise((resolve, reject) => {
     execFile(
       "yt-dlp",
-      ytDlpArgs,
-      { env: getDirectNetworkEnv(), timeout: YT_TIMEOUT_MS },
+      args,
+      { env: getNetworkEnv(), timeout: YT_TIMEOUT_MS },
       (err, _stdout, stderr) => {
         if (err) {
           const e = new Error(stderr || err.message);
-          e.stderr = stderr;
+          e.stderr = stderr || err.message;
           return reject(e);
         }
         resolve();
       },
     );
   });
+}
+
+// Download the native best-audio stream to outPath (raw container — m4a/opus/webm).
+// No WAV extraction here: decoding to PCM happens once in getSourceAudio, avoiding a
+// redundant transcode. `-N` downloads fragments in parallel for faster network IO.
+//
+// Rotates through YTDLP_PLAYER_CLIENTS and retries the whole loop YTDLP_MAX_ATTEMPTS
+// times — YouTube breaks individual clients constantly, so a single hardcoded client
+// fails far more often than a rotation. Stops early on non-retryable errors
+// (private/removed video, too long) so we fail fast with a clear reason.
+async function downloadAudio(url, outPath) {
+  const cookiesPath = await getWritableCookiesPath();
+  const clients = YTDLP_PLAYER_CLIENTS.length
+    ? YTDLP_PLAYER_CLIENTS
+    : ["default"];
+  let lastErr;
+  for (let attempt = 0; attempt < YTDLP_MAX_ATTEMPTS; attempt++) {
+    for (const client of clients) {
+      try {
+        await runYtDlp(buildYtDlpArgs({ url, outPath, client, cookiesPath }));
+        return; // success
+      } catch (e) {
+        lastErr = e;
+        const { code, retryable } = classifyYtError(e.stderr);
+        safeUnlink(outPath); // remove any partial file before retrying
+        safeUnlink(outPath + ".part");
+        if (!retryable) throw decorateYtError(e);
+        console.warn(
+          `[yt-dlp] client=${client} attempt=${attempt + 1}/${YTDLP_MAX_ATTEMPTS} failed: ${code}`,
+        );
+      }
+    }
+  }
+  throw decorateYtError(lastErr || new Error("yt-dlp failed"));
 }
 
 // Returns a path to the decoded source audio (PCM 16le 44.1k WAV) for a URL,
@@ -467,7 +613,11 @@ async function getSourceAudio(url) {
   }
 }
 
-function getDirectNetworkEnv() {
+// When YTDLP_PROXY is configured, the explicit --proxy flag drives routing, so
+// pass the env through untouched. Otherwise strip ambient proxy vars so a stray
+// HTTP_PROXY on the host can't silently route (and break) yt-dlp.
+function getNetworkEnv() {
+  if (YTDLP_PROXY) return process.env;
   const env = { ...process.env };
   delete env.HTTP_PROXY;
   delete env.HTTPS_PROXY;
@@ -536,6 +686,13 @@ app.get("/api/status", async (_req, res) => {
   res.status(ok ? 200 : 503).json({
     ok,
     dependencies: publicStatus,
+    // Booleans only — never leak proxy URL / cookie contents.
+    youtube: {
+      cookiesConfigured: COOKIES_EXISTS,
+      proxyConfigured: !!YTDLP_PROXY,
+      potProviderConfigured: !!POT_PROVIDER_BASE_URL,
+      playerClients: YTDLP_PLAYER_CLIENTS,
+    },
   });
 });
 
@@ -558,9 +715,7 @@ app.post("/api/youtube-key", async (req, res) => {
       const key = await pendingJobs.get(url);
       return res.json({ key, cached: true });
     } catch (e) {
-      return res
-        .status(500)
-        .json({ error: "Failed to detect key", details: e.message });
+      return res.status(502).json(ytErrorResponse(e, "Failed to detect key"));
     }
   }
   const deps = await getDependencyStatus();
@@ -610,11 +765,7 @@ app.post("/api/youtube-key", async (req, res) => {
     const key = await jobPromise;
     res.json({ key, cached: false });
   } catch (e) {
-    res.status(500).json({
-      error: "Failed to process audio",
-      details: e.message,
-      hint: "Video may be unavailable, blocked, too long, or network/proxy is restricted.",
-    });
+    res.status(502).json(ytErrorResponse(e, "Failed to process audio"));
   } finally {
     pendingJobs.delete(url);
   }
@@ -669,6 +820,18 @@ app.post("/api/youtube-transpose", async (req, res) => {
       error: "Invalid YouTube URL",
       hint: "URL must be a valid youtube.com or youtu.be link.",
     });
+  // Strip playlist/radio params — yt-dlp fetches playlist metadata which
+  // hits YouTube's rate limit. Only the video ID is needed.
+  const normalizedUrl = (() => {
+    try {
+      const u = new URL(url);
+      const videoId = u.searchParams.get("v");
+      if (videoId && (u.hostname.includes("youtube.com"))) {
+        return `https://www.youtube.com/watch?v=${videoId}`;
+      }
+    } catch (_) {}
+    return url;
+  })();
   const semitoneNum = Number(semitones);
   if (Number.isNaN(semitoneNum) || semitoneNum < -12 || semitoneNum > 12) {
     return res
@@ -676,7 +839,7 @@ app.post("/api/youtube-transpose", async (req, res) => {
       .json({ error: "Semitones must be between -12 and 12." });
   }
   const isTempo = tempoMode === true;
-  const cacheKey = `${url}::${semitoneNum}::${isTempo ? "t" : "p"}`;
+  const cacheKey = `${normalizedUrl}::${semitoneNum}::${isTempo ? "t" : "p"}`;
   if (
     transposeCache.has(cacheKey) &&
     fs.existsSync(transposeCache.get(cacheKey))
@@ -689,8 +852,8 @@ app.post("/api/youtube-transpose", async (req, res) => {
       return res.download(outPath, "transposed.wav");
     } catch (e) {
       return res
-        .status(500)
-        .json({ error: "Failed to transpose audio", details: e.message });
+        .status(502)
+        .json(ytErrorResponse(e, "Failed to transpose audio"));
     }
   }
   const deps = await getDependencyStatus();
@@ -718,7 +881,7 @@ app.post("/api/youtube-transpose", async (req, res) => {
     const outPath = path.join(tmpDir, `${id}-out.wav`);
 
     // Cached, decoded source PCM (downloaded once per URL). Never unlinked here.
-    const srcPath = await getSourceAudio(url);
+    const srcPath = await getSourceAudio(normalizedUrl);
 
     if (semitoneNum !== 0 || isTempo) {
       const timeRatio = (1 / Math.pow(2, semitoneNum / 12)).toFixed(6);
@@ -756,11 +919,7 @@ app.post("/api/youtube-transpose", async (req, res) => {
       if (err) safeUnlink(outPath);
     });
   } catch (e) {
-    res.status(500).json({
-      error: "Failed to process audio",
-      details: e.message,
-      hint: "Video may be unavailable, blocked, too long, or network/proxy is restricted.",
-    });
+    res.status(502).json(ytErrorResponse(e, "Failed to process audio"));
   } finally {
     pendingJobs.delete(cacheKey);
   }
@@ -817,4 +976,10 @@ if (require.main === module) {
   process.on("SIGTERM", () => shutdown(server, "SIGTERM"));
 }
 
-module.exports = { app, BoundedCache, isValidYouTubeUrl };
+module.exports = {
+  app,
+  BoundedCache,
+  isValidYouTubeUrl,
+  classifyYtError,
+  buildYtDlpArgs,
+};
