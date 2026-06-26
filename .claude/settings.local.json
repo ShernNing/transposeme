@@ -83,7 +83,10 @@
       "Bash(node --check vite.config.js)",
       "Bash(node --check src/hooks/useYouTubeTranspose.js)",
       "Bash(node --check server/index.cjs)",
-      "Bash(node -e \"const m=require\\('./server/index.cjs'\\); console.log\\('exports:', Object.keys\\(m\\).join\\(','\\)\\);\")"
+      "Bash(node -e \"const m=require\\('./server/index.cjs'\\); console.log\\('exports:', Object.keys\\(m\\).join\\(','\\)\\);\")",
+      "Bash(curl -s -m 5 http://localhost:4000/api/status)",
+      "Bash(echo \"---HTTP $?---\")",
+      "Bash(lsof -nP -iTCP:4000 -sTCP:LISTEN)"
     ]
   }
 }

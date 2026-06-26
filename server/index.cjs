@@ -100,7 +100,14 @@ const YT_TIMEOUT_MS = 300000;
 const RUBBERBAND_TIMEOUT_MS = 600000;
 const PYTHON_TIMEOUT_MS = 60000;
 const MAX_VIDEO_DURATION_SECONDS = 1200;
-const COOKIES_PATH = process.env.COOKIES_PATH || "/app/cookies.txt";
+// /app/cookies.txt is the Docker mount; fall back to a cookies.txt sitting next
+// to this script so local `npm start` picks up the same file without setting
+// COOKIES_PATH. Explicit COOKIES_PATH always wins.
+const COOKIES_PATH =
+  process.env.COOKIES_PATH ||
+  (fs.existsSync("/app/cookies.txt")
+    ? "/app/cookies.txt"
+    : path.join(__dirname, "cookies.txt"));
 const COOKIES_EXISTS = fs.existsSync(COOKIES_PATH);
 
 // --- YouTube extraction tuning (all overridable via env) ---------------------
@@ -374,6 +381,22 @@ function isValidYouTubeUrl(url) {
   return YOUTUBE_URL_RE.test(url);
 }
 
+// Strip playlist/radio params (e.g. &list=RD...&start_radio=1) so yt-dlp only
+// downloads the single video. Without this, radio (RD...) URLs make yt-dlp
+// fetch an endless auto-generated playlist, hanging the request for many
+// minutes. Keeping the key consistent also lets youtube-key reuse the source
+// audio already cached by youtube-transpose.
+function normalizeYouTubeUrl(url) {
+  try {
+    const u = new URL(url);
+    const videoId = u.searchParams.get("v");
+    if (videoId && u.hostname.includes("youtube.com")) {
+      return `https://www.youtube.com/watch?v=${videoId}`;
+    }
+  } catch (_) {}
+  return url;
+}
+
 function safeUnlink(filePath) {
   fs.unlink(filePath, () => {});
 }
@@ -499,6 +522,8 @@ function buildYtDlpArgs({ url, outPath, client, cookiesPath }) {
     `youtube:player_client=${client}`,
     "--match-filter",
     `duration <= ${MAX_VIDEO_DURATION_SECONDS}`,
+    // Never expand playlists/radio mixes — download only the requested video.
+    "--no-playlist",
     "-f",
     "bestaudio/best",
     "-N",
@@ -707,12 +732,15 @@ app.post("/api/youtube-key", async (req, res) => {
       error: "Invalid YouTube URL",
       hint: "URL must be a valid youtube.com or youtu.be link.",
     });
-  if (keyCache.has(url)) {
-    return res.json({ key: keyCache.get(url), cached: true });
+  // Strip playlist/radio params so we download a single video (not an endless
+  // radio) and reuse the source audio youtube-transpose already cached.
+  const normalizedUrl = normalizeYouTubeUrl(url);
+  if (keyCache.has(normalizedUrl)) {
+    return res.json({ key: keyCache.get(normalizedUrl), cached: true });
   }
-  if (pendingJobs.has(url)) {
+  if (pendingJobs.has(normalizedUrl)) {
     try {
-      const key = await pendingJobs.get(url);
+      const key = await pendingJobs.get(normalizedUrl);
       return res.json({ key, cached: true });
     } catch (e) {
       return res.status(502).json(ytErrorResponse(e, "Failed to detect key"));
@@ -740,7 +768,7 @@ app.post("/api/youtube-key", async (req, res) => {
   const jobPromise = (async () => {
     // Reuse the decoded source audio cached per URL (shared with transpose).
     // Do not delete it here — it stays cached for subsequent requests.
-    const audioPath = await getSourceAudio(url);
+    const audioPath = await getSourceAudio(normalizedUrl);
 
     let keyResult = "";
     await new Promise((resolve, reject) => {
@@ -756,18 +784,18 @@ app.post("/api/youtube-key", async (req, res) => {
       );
     });
     if (!keyResult) throw new Error("Key detection returned empty result");
-    keyCache.set(url, keyResult);
+    keyCache.set(normalizedUrl, keyResult);
     return keyResult;
   })();
 
-  pendingJobs.set(url, jobPromise);
+  pendingJobs.set(normalizedUrl, jobPromise);
   try {
     const key = await jobPromise;
     res.json({ key, cached: false });
   } catch (e) {
     res.status(502).json(ytErrorResponse(e, "Failed to process audio"));
   } finally {
-    pendingJobs.delete(url);
+    pendingJobs.delete(normalizedUrl);
   }
 });
 
@@ -822,16 +850,7 @@ app.post("/api/youtube-transpose", async (req, res) => {
     });
   // Strip playlist/radio params — yt-dlp fetches playlist metadata which
   // hits YouTube's rate limit. Only the video ID is needed.
-  const normalizedUrl = (() => {
-    try {
-      const u = new URL(url);
-      const videoId = u.searchParams.get("v");
-      if (videoId && (u.hostname.includes("youtube.com"))) {
-        return `https://www.youtube.com/watch?v=${videoId}`;
-      }
-    } catch (_) {}
-    return url;
-  })();
+  const normalizedUrl = normalizeYouTubeUrl(url);
   const semitoneNum = Number(semitones);
   if (Number.isNaN(semitoneNum) || semitoneNum < -12 || semitoneNum > 12) {
     return res
